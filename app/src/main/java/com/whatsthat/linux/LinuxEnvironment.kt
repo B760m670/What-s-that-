@@ -75,6 +75,24 @@ class LinuxEnvironment(context: Context) {
         return endpoint
     }
 
+    /**
+     * Run an arbitrary command inside the Ubuntu container and stream its
+     * combined stdout+stderr to [onLog]. This backs the in-app console: error
+     * output from the command shows up in the log just like normal output.
+     * Returns the command's exit code (non-zero is surfaced to the user).
+     */
+    fun runCommand(command: String, onLog: (String) -> Unit): Int {
+        if (!isBootstrapped) {
+            onLog("error: Ubuntu is not installed yet — install it first.")
+            return 1
+        }
+        val cmd = listOf(
+            "/system/bin/sh", File(scriptsDir, "run-in-ubuntu.sh").absolutePath,
+            "/bin/bash", "-lc", command,
+        )
+        return exec(cmd, emptyMap(), onLog)
+    }
+
     // --- internals -----------------------------------------------------------
 
     private fun execScript(

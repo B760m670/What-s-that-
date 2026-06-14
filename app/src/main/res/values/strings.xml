@@ -7,4 +7,7 @@
     <string name="status_arch">Device arch: %1$s</string>
     <string name="notif_running">Linux session is running</string>
     <string name="hint_no_vnc_viewer">Desktop is up at %1$s — install a VNC viewer to connect.</string>
+    <string name="console_title">Logs &amp; command console</string>
+    <string name="cmd_hint">Type a command, e.g. apt list --installed</string>
+    <string name="run">Run</string>
 </resources>

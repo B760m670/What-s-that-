@@ -30,6 +30,22 @@ class MainActivity : AppCompatActivity() {
 
         refreshState()
         binding.actionButton.setOnClickListener { onAction() }
+        binding.runButton.setOnClickListener { runConsoleCommand() }
+        binding.cmdInput.setOnEditorActionListener { _, _, _ -> runConsoleCommand(); true }
+    }
+
+    /** Run whatever the user typed in the console, inside the container. */
+    private fun runConsoleCommand() {
+        val cmd = binding.cmdInput.text.toString().trim()
+        if (cmd.isEmpty()) return
+        binding.cmdInput.text.clear()
+        appendLog("$ $cmd")
+        binding.runButton.isEnabled = false
+        lifecycleScope.launch {
+            val code = withContext(Dispatchers.IO) { env.runCommand(cmd, ::appendLog) }
+            if (code != 0) appendLog("[exit $code]")
+            binding.runButton.isEnabled = true
+        }
     }
 
     private fun refreshState() {

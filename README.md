@@ -56,7 +56,26 @@ launcher** and fetches the OS image on first run. Light APK, full system inside.
 | `app/src/main/assets/scripts/start-desktop.sh` | Starts XFCE on a VNC display |
 | `tools/fetch-proot.sh` | Pulls prebuilt `proot` binaries into `jniLibs/` |
 
-## Building the APK
+## Get the APK (automatic builds)
+
+Every push is built into a downloadable APK by GitHub Actions
+([`.github/workflows/build-apk.yml`](.github/workflows/build-apk.yml)) — no
+third-party build service. Grab it from:
+
+- the **`ci-latest`** pre-release on the repo's Releases page (phone-friendly
+  direct link: `app-full-debug.apk` or `app-lite-debug.apk`), or
+- the **Artifacts** of any workflow run under the Actions tab.
+
+The build runs on GitHub's runners, which carry the Android SDK — so the APK is
+produced in your own repo's CI, keeping the supply chain under your control.
+
+## Console
+
+After the system is up, the app has an in-app **logs & command console**: type a
+shell command, run it inside the container, and see stdout plus any error output
+(and the exit code) in the log — handy for debugging without a separate terminal.
+
+## Building locally
 
 Prerequisites: **Android Studio** (or Android SDK cmdline-tools) + JDK 17.
 
@@ -82,5 +101,15 @@ viewer is the next milestone — see `docs/ARCHITECTURE.md`).
 Built on open source: `proot` (GPLv2), Ubuntu base images (Canonical),
 TigerVNC, XFCE. This project's own code is MIT-licensed.
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design, the known
-limitations of running under proot, and the roadmap.
+## Decentralised & secure
+
+No central server, no account, no telemetry. The rootfs comes from public,
+**user-swappable** mirrors and is **SHA256-verified** before install; the
+desktop binds to loopback only. Full model in
+[`docs/SECURITY.md`](docs/SECURITY.md).
+
+## Docs
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — design, proot limits, roadmap
+- [`docs/SECURITY.md`](docs/SECURITY.md) — decentralisation & security model
+- [`docs/ENGINE-VALIDATION.md`](docs/ENGINE-VALIDATION.md) — proof the engine runs

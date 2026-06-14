@@ -35,12 +35,20 @@
         android:indeterminate="true"
         android:visibility="gone" />
 
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="@string/console_title"
+        android:textStyle="bold"
+        android:textSize="14sp" />
+
     <ScrollView
         android:id="@+id/logScroll"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:layout_marginTop="12dp"
+        android:layout_marginTop="4dp"
         android:background="#11000000"
         android:padding="8dp">
 
@@ -53,4 +61,30 @@
             android:textColor="#33CC33"
             android:textIsSelectable="true" />
     </ScrollView>
+
+    <!-- Command console: type a shell command, run it inside the container,
+         see stdout + error output in the log above. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal">
+
+        <EditText
+            android:id="@+id/cmdInput"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="monospace"
+            android:imeOptions="actionSend"
+            android:inputType="textNoSuggestions"
+            android:hint="@string/cmd_hint" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/runButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:text="@string/run" />
+    </LinearLayout>
 </LinearLayout>

@@ -6,13 +6,15 @@
   "build": {
     "production": {
       "android": {
-        "config": "android-apk.yml"
+        "config": "android-apk.yml",
+        "image": "latest"
       }
     },
     "preview": {
       "distribution": "internal",
       "android": {
-        "config": "android-apk.yml"
+        "config": "android-apk.yml",
+        "image": "latest"
       }
     }
   }

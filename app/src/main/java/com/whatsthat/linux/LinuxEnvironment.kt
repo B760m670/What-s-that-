@@ -46,13 +46,18 @@ class LinuxEnvironment(context: Context) {
         }
     }
 
-    /** Download + extract the Ubuntu rootfs. Streams log lines to [onLog]. */
+    /**
+     * Download + verify + extract the Ubuntu rootfs. Done entirely in-process
+     * (the Android sandbox has no curl/tar/xz), see [RootfsInstaller].
+     */
     fun bootstrap(onLog: (String) -> Unit): Int =
-        execScript(
-            "bootstrap.sh", insideContainer = false,
-            extraEnv = mapOf("WT_VARIANT" to BuildConfig.UBUNTU_VARIANT),
+        RootfsInstaller(
+            home = home,
+            rootfs = rootfs,
+            arch = arch,
+            variant = BuildConfig.UBUNTU_VARIANT,
             onLog = onLog,
-        )
+        ).install()
 
     /** Install the desktop inside the container, per the build's profile. */
     fun installDesktop(onLog: (String) -> Unit): Int =

@@ -73,4 +73,7 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    // Pure-Java XZ decompression for the Ubuntu .tar.xz rootfs (no native/curl
+    // dependency on the device). Tar is parsed by our own extractor.
+    implementation("org.tukaani:xz:1.9")
 }

@@ -5,7 +5,7 @@
 # This is the single entry point every other action goes through, so the proot
 # binding flags live in exactly one place.
 #
-# Exported by the app: WT_HOME, WT_ARCH, PROOT  (see bootstrap.sh)
+# Exported by the app: WT_HOME, WT_ARCH, PROOT  (see LinuxEnvironment.kt)
 set -eu
 
 : "${WT_HOME:?}" "${PROOT:?}"

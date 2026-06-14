@@ -50,7 +50,7 @@ launcher** and fetches the OS image on first run. Light APK, full system inside.
 | `app/src/main/java/.../LinuxEnvironment.kt` | Engine: arch detection, asset prep, runs the scripts through proot |
 | `app/src/main/java/.../MainActivity.kt` | One-button UI: Install Ubuntu → Install XFCE → Launch |
 | `app/src/main/java/.../LinuxSessionService.kt` | Foreground service keeping the session alive |
-| `app/src/main/assets/scripts/bootstrap.sh` | Downloads + extracts the Ubuntu rootfs |
+| `app/src/main/java/.../RootfsInstaller.kt` | Downloads + verifies (SHA256) + extracts the Ubuntu rootfs in-process (no curl/tar needed on device) |
 | `app/src/main/assets/scripts/run-in-ubuntu.sh` | The single proot entry point (all binds in one place) |
 | `app/src/main/assets/scripts/install-desktop.sh` | Installs the lean XFCE desktop + tools |
 | `app/src/main/assets/scripts/start-desktop.sh` | Starts XFCE on a VNC display |

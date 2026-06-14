@@ -55,5 +55,9 @@ jobs:
         if: env.token_present == 'true'
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          # This is a native app with no JS dependencies — package.json is only
+          # EAS project metadata — so there is no lockfile to check.
+          EAS_BUILD_SKIP_LOCKFILE_CHECK: '1'
+          EAS_BUILD_NO_EXPO_GO_WARNING: 'true'
         run: |
           eas build --platform android --profile production --non-interactive --no-wait

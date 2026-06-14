@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId = "com.whatsthat.linux"
-        minSdk = 24          // Android 7.0 — required for modern proot syscalls
+        minSdk = 21          // Android 5.0 Lollipop — oldest supported
         targetSdk = 34
         versionCode = 1
         versionName = "0.1.0"
@@ -39,8 +39,30 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+    // Two footprints from one codebase:
+    //   full — XFCE + browser + dev tools, for capable phones
+    //   lite — minimal Openbox + a terminal/file-manager, for old/weak devices
+    //          (Android 5 era). Each flavor only changes which packages the
+    //          in-container installer pulls; the engine is identical.
+    flavorDimensions += "footprint"
+    productFlavors {
+        create("full") {
+            dimension = "footprint"
+            buildConfigField("String", "DESKTOP_PROFILE", "\"full\"")
+            buildConfigField("String", "UBUNTU_VARIANT", "\"standard\"")
+        }
+        create("lite") {
+            dimension = "footprint"
+            applicationIdSuffix = ".lite"
+            versionNameSuffix = "-lite"
+            buildConfigField("String", "DESKTOP_PROFILE", "\"lite\"")
+            buildConfigField("String", "UBUNTU_VARIANT", "\"minimal\"")
+        }
+    }
+
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 }
 

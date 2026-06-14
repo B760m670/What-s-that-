@@ -12,8 +12,9 @@ We deliberately keep the APK tiny and pull the OS at runtime:
 
 1. **APK contents:** the Kotlin launcher, the `proot` binary (as a per-ABI
    native lib so the installer marks it executable), and four shell scripts.
-2. **First launch:** `bootstrap.sh` downloads the Ubuntu 22.04 *core* image
-   (~30 MB compressed) and extracts it.
+2. **First launch:** `bootstrap.sh` downloads an Ubuntu 22.04 rootfs from
+   `cloud-images.ubuntu.com` (the *minimal* image for the lite flavor, the
+   standard server rootfs otherwise) and extracts it.
 3. **Desktop install:** `install-desktop.sh` (run inside the container) installs
    XFCE + TigerVNC + a curated tool set, then trims apt caches.
 4. **Run:** `start-desktop.sh` launches XFCE on VNC display `:1`, reachable only

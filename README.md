@@ -9,11 +9,20 @@ XFCE desktop, and shows it over a loopback VNC connection. You get a real
 `apt`-driven Ubuntu with windows, a terminal, a browser and dev tools — not a
 toy emulator.
 
-> Status: **v0.1 — working foundation.** The Android project, the proot engine
-> integration and the Ubuntu/XFCE bootstrap scripts are complete and reviewed.
-> Building the signed APK and testing on a device is done by you (see below):
-> the project was authored in a sandbox with no Android device and a restricted
-> network, so an on-device run is the remaining step.
+> Status: **v0.1 — working foundation, engine verified.** The proot + Ubuntu +
+> `apt` engine was run end-to-end and confirmed working (see
+> [`docs/ENGINE-VALIDATION.md`](docs/ENGINE-VALIDATION.md)). Building/signing the
+> APK and testing the GUI on a device is the remaining step — the project was
+> authored in a sandbox with no Android device and a network policy that blocks
+> Google's SDK hosts, so that part runs on your machine.
+
+## Compatibility & footprints
+
+- **Runs from Android 5.0 (API 21) upward** — old and current phones alike.
+- Two build flavors from one codebase:
+  - **full** — XFCE + Firefox + dev tools, standard Ubuntu rootfs. Capable phones.
+  - **lite** — Openbox + terminal + file manager, *minimal* Ubuntu rootfs.
+    For old / low-RAM devices. Installs as a separate app (`.lite`).
 
 ## Why "download Ubuntu as an APK" works this way
 
@@ -58,12 +67,13 @@ Prerequisites: **Android Studio** (or Android SDK cmdline-tools) + JDK 17.
 # 2. Point the build at your SDK
 echo "sdk.dir=$HOME/Android/Sdk" > local.properties
 
-# 3. Build
-./gradlew assembleDebug
-# → app/build/outputs/apk/debug/app-debug.apk
+# 3. Build the flavor you want
+./gradlew assembleFullDebug   # full XFCE build
+./gradlew assembleLiteDebug   # lightweight build for old phones
+# → app/build/outputs/apk/<flavor>/debug/app-<flavor>-debug.apk
 ```
 
-Install the APK, tap the button three times (Install Ubuntu → Install XFCE →
+Install the APK, tap the button three times (Install Ubuntu → Install desktop →
 Launch), and connect with any VNC viewer to `127.0.0.1:5901` (an embedded
 viewer is the next milestone — see `docs/ARCHITECTURE.md`).
 

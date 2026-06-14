@@ -48,11 +48,19 @@ class LinuxEnvironment(context: Context) {
 
     /** Download + extract the Ubuntu rootfs. Streams log lines to [onLog]. */
     fun bootstrap(onLog: (String) -> Unit): Int =
-        execScript("bootstrap.sh", insideContainer = false, onLog = onLog)
+        execScript(
+            "bootstrap.sh", insideContainer = false,
+            extraEnv = mapOf("WT_VARIANT" to BuildConfig.UBUNTU_VARIANT),
+            onLog = onLog,
+        )
 
-    /** Install XFCE + tools inside the container. */
+    /** Install the desktop inside the container, per the build's profile. */
     fun installDesktop(onLog: (String) -> Unit): Int =
-        execScript("install-desktop.sh", insideContainer = true, onLog = onLog)
+        execScript(
+            "install-desktop.sh", insideContainer = true,
+            extraEnv = mapOf("WT_PROFILE" to BuildConfig.DESKTOP_PROFILE),
+            onLog = onLog,
+        )
 
     /**
      * Start the XFCE/VNC session. Returns the loopback "host:port" the viewer

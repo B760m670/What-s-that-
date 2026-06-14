@@ -16,17 +16,20 @@ if [ ! -f "$ROOTFS/.bootstrap-done" ]; then
     exit 1
 fi
 
-# Android blocks ptrace by default for sibling processes; proot needs this to
-# be tolerant, hence -L (link2symlink) and kill-on-exit for clean teardown.
+# Flags kept to the subset shared by Termux proot and upstream proot, so the
+# same wrapper works on-device and in tests:
+#   -0  run as fake root        -r  guest rootfs
+#   -w  initial working dir     -b  bind host paths into the guest
+# (We deliberately do NOT pass --kill-on-exit: the VNC server must survive
+#  after start-desktop.sh's proot invocation returns.)
 exec "$PROOT" \
-    --kill-on-exit \
-    --root-id \
-    --rootfs="$ROOTFS" \
-    --cwd=/root \
-    --bind=/dev \
-    --bind=/proc \
-    --bind=/sys \
-    --bind="$WT_HOME/tmp:/tmp" \
+    -0 \
+    -r "$ROOTFS" \
+    -w /root \
+    -b /dev \
+    -b /proc \
+    -b /sys \
+    -b "$WT_HOME/tmp:/tmp" \
     /usr/bin/env -i \
         HOME=/root \
         USER=root \
@@ -34,4 +37,7 @@ exec "$PROOT" \
         LANG=C.UTF-8 \
         PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
         DISPLAY=:1 \
+        WT_PROFILE="${WT_PROFILE:-full}" \
+        WT_VARIANT="${WT_VARIANT:-standard}" \
+        WT_GEOMETRY="${WT_GEOMETRY:-1280x720}" \
         "$@"

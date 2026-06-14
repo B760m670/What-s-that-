@@ -1,9 +1,9 @@
 package com.whatsthat.linux
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.whatsthat.linux.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
@@ -78,15 +78,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Hand the loopback display to a VNC viewer. An embedded SurfaceView
-     *  client is the next milestone; for now we open the device's viewer. */
+    /** Open the desktop in the app's own embedded VNC viewer, and keep the
+     *  Linux session alive in the background while it's shown. */
     private fun launchVncViewer(endpoint: String) {
-        val (host, port) = endpoint.split(":")
-        runCatching {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("vnc://$host:$port")))
-        }.onFailure {
-            appendLog(getString(R.string.hint_no_vnc_viewer, endpoint))
-        }
+        val parts = endpoint.split(":")
+        val host = parts.getOrElse(0) { "127.0.0.1" }
+        val port = parts.getOrNull(1)?.toIntOrNull() ?: 5901
+        ContextCompat.startForegroundService(this, Intent(this, LinuxSessionService::class.java))
+        VncActivity.start(this, host, port)
     }
 
     private fun setBusy(busy: Boolean) {

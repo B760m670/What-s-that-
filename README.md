@@ -108,8 +108,8 @@ echo "sdk.dir=$HOME/Android/Sdk" > local.properties
 ```
 
 Install the APK, tap the button three times (Install Ubuntu → Install desktop →
-Launch), and connect with any VNC viewer to `127.0.0.1:5901` (an embedded
-viewer is the next milestone — see `docs/ARCHITECTURE.md`).
+Launch), and the desktop opens in the app's **built-in VNC viewer** — no
+separate app needed. A floating ⌨ button shows the soft keyboard for typing.
 
 ## License & credits
 

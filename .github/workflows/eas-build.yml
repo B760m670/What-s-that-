@@ -19,8 +19,6 @@ on:
 jobs:
   eas-build:
     runs-on: ubuntu-latest
-    # Skip cleanly if no token is configured yet, so pushes don't show as failed.
-    if: ${{ github.event_name == 'workflow_dispatch' || true }}
     steps:
       - uses: actions/checkout@v4
 

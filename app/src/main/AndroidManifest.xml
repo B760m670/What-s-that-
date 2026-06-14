@@ -27,6 +27,14 @@
             </intent-filter>
         </activity>
 
+        <!-- Embedded VNC desktop viewer (our own RFB client). -->
+        <activity
+            android:name=".VncActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.WhatsThatLinux" />
+
         <!-- Foreground service that hosts the running Linux session. -->
         <service
             android:name=".LinuxSessionService"

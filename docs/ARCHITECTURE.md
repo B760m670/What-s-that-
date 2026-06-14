@@ -44,8 +44,9 @@ also far lighter, matching the "lightweight but complete" goal.
 
 ## Roadmap
 
-- [ ] **Embedded VNC viewer** — a `SurfaceView`-based client so the desktop
-      renders in-app instead of handing off to an external VNC app.
+- [x] **Embedded VNC viewer** — a self-written RFB client (`VncClient` +
+      `VncCanvasView` + `VncActivity`) renders the desktop in-app with touch and
+      soft-keyboard input. No external app or library.
 - [ ] **Distro picker** — Debian / Alpine / Arch alongside Ubuntu.
 - [ ] **Persistent sessions** — reconnect to a running desktop after the app is
       backgrounded.

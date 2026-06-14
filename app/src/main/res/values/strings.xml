@@ -10,4 +10,5 @@
     <string name="console_title">Logs &amp; command console</string>
     <string name="cmd_hint">Type a command, e.g. apt list --installed</string>
     <string name="run">Run</string>
+    <string name="show_keyboard">⌨</string>
 </resources>

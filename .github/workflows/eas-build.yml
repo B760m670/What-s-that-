@@ -9,9 +9,7 @@ name: EAS Build
 #        value: <your Expo access token>   (rotate the one shared in chat!)
 #   2. Once locally: `npx eas-cli@latest init` to create/link the Expo project
 #      (writes extra.eas.projectId into app.json). Commit that change.
-#
-# Note: this runs alongside build-apk.yml (GitHub Actions native build). Keep
-# whichever you prefer; they don't conflict.
+#      (The job also attempts this automatically below.)
 on:
   push:
   workflow_dispatch:
@@ -42,6 +40,16 @@ jobs:
       - name: Install EAS CLI
         if: env.token_present == 'true'
         run: npm install -g eas-cli
+
+      # Best-effort: link/create the Expo project so projectId is set. The
+      # reliable path is to run `npx eas-cli@latest init` once locally and
+      # commit the resulting extra.eas.projectId in app.json; then this is a
+      # no-op. --force links to an existing project instead of erroring.
+      - name: Ensure EAS project is initialized
+        if: env.token_present == 'true'
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: eas init --non-interactive --force || true
 
       - name: Trigger EAS build (Android, production profile)
         if: env.token_present == 'true'

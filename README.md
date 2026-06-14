@@ -56,33 +56,29 @@ launcher** and fetches the OS image on first run. Light APK, full system inside.
 | `app/src/main/assets/scripts/start-desktop.sh` | Starts XFCE on a VNC display |
 | `tools/fetch-proot.sh` | Pulls prebuilt `proot` binaries into `jniLibs/` |
 
-## Get the APK (automatic builds)
+## Get the APK (EAS Build, automatic on push)
 
-Every push is built into a downloadable APK by GitHub Actions
-([`.github/workflows/build-apk.yml`](.github/workflows/build-apk.yml)) — no
-third-party build service. Grab it from:
-
-- the **`ci-latest`** pre-release on the repo's Releases page (phone-friendly
-  direct link: `app-full-debug.apk` or `app-lite-debug.apk`), or
-- the **Artifacts** of any workflow run under the Actions tab.
-
-The build runs on GitHub's runners, which carry the Android SDK — so the APK is
-produced in your own repo's CI, keeping the supply chain under your control.
-
-### EAS Build (optional)
-
-An EAS Build pipeline is also wired up (`eas.json`, `.eas/build/android-apk.yml`,
-`.github/workflows/eas-build.yml`) for those who prefer Expo's cloud. It's a
+Every push triggers an **EAS Build** that produces the installable APK
+(`eas.json` + [`.eas/build/android-apk.yml`](.eas/build/android-apk.yml) +
+[`.github/workflows/eas-build.yml`](.github/workflows/eas-build.yml)). It's a
 **custom build** config (this is a native project, not React Native), so Gradle
-runs from the repo root. To enable it:
+runs `assembleFullDebug` / `assembleLiteDebug` from the repo root.
+
+Download the finished APK from the build's page on your **Expo dashboard**
+(expo.dev → your project → Builds), which gives a phone-friendly link / QR.
+
+### One-time setup
 
 1. Add an `EXPO_TOKEN` repo secret (Settings → Secrets → Actions). **Never
    commit the token.**
-2. Run `npx eas-cli@latest init` once to link the Expo project (adds
-   `extra.eas.projectId` to `app.json`), then commit that.
+2. Link the Expo project so it has a `projectId`. The workflow attempts this
+   automatically (`eas init --non-interactive --force`); if your account needs
+   it done by hand, run once locally and commit:
+   ```bash
+   npx eas-cli@latest init   # writes extra.eas.projectId into app.json
+   ```
 
 The EAS job skips cleanly until the token is set, so it won't fail your pushes.
-GitHub Actions remains the default, fully-decentralised path.
 
 ## Console
 

@@ -16,10 +16,13 @@ public, verifiable sources and runs it entirely on your device.
   - `WT_ROOTFS_URL` — an exact tarball URL, overriding everything.
 - **The engine is open and reusable.** `proot` (GPLv2) and the rootfs are
   standard components; nothing proprietary is wedged in between.
-- **Builds are your own.** CI runs in *your* GitHub repo (see
-  `.github/workflows/build-apk.yml`) — not on a third-party build cloud — so the
-  APK supply chain stays under your control. Anyone can fork and rebuild
-  bit-for-bit.
+- **Builds are reproducible and forkable.** The entire build is defined in-repo
+  (`eas.json`, `.eas/build/android-apk.yml`); anyone can fork and rebuild from
+  source. The APK is currently produced via EAS Build (Expo's cloud) — a
+  convenience that does introduce a third-party builder into the supply chain.
+  If you want a fully self-hosted, no-third-party pipeline, swap the EAS
+  workflow for a self-hosted GitHub Actions runner (or any CI) that runs
+  `./gradlew assembleFullDebug` — the Gradle build needs nothing Expo-specific.
 
 ## Security measures
 

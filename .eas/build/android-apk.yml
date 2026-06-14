@@ -1,0 +1,25 @@
+# EAS Build custom build config for this NATIVE (non-React-Native) project.
+# EAS normally runs Gradle inside an `android/` subdir; our Gradle project lives
+# at the repo root, so each step sets working_directory accordingly.
+build:
+  name: Build What's that? — Linux (full + lite debug APKs)
+  steps:
+    - eas/checkout
+
+    - run:
+        name: Fetch proot engine binaries
+        command: |
+          chmod +x tools/fetch-proot.sh
+          ./tools/fetch-proot.sh
+
+    - run:
+        name: Assemble full + lite debug APKs
+        command: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleFullDebug assembleLiteDebug
+
+    - eas/upload_artifact:
+        name: Upload APKs
+        inputs:
+          type: build-artifact
+          path: app/build/outputs/**/*.apk

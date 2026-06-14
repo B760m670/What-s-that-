@@ -10,6 +10,9 @@ local.properties
 # Prebuilt proot binaries are fetched by tools/fetch-proot.sh, not committed.
 app/src/main/jniLibs/*/libproot.so
 
+# Node / EAS
+node_modules/
+
 # IDE
 .idea/
 *.iml

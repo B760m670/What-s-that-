@@ -1,0 +1,19 @@
+{
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "production": {
+      "android": {
+        "config": "android-apk.yml"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "config": "android-apk.yml"
+      }
+    }
+  }
+}

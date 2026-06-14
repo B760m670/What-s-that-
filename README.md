@@ -69,6 +69,21 @@ third-party build service. Grab it from:
 The build runs on GitHub's runners, which carry the Android SDK — so the APK is
 produced in your own repo's CI, keeping the supply chain under your control.
 
+### EAS Build (optional)
+
+An EAS Build pipeline is also wired up (`eas.json`, `.eas/build/android-apk.yml`,
+`.github/workflows/eas-build.yml`) for those who prefer Expo's cloud. It's a
+**custom build** config (this is a native project, not React Native), so Gradle
+runs from the repo root. To enable it:
+
+1. Add an `EXPO_TOKEN` repo secret (Settings → Secrets → Actions). **Never
+   commit the token.**
+2. Run `npx eas-cli@latest init` once to link the Expo project (adds
+   `extra.eas.projectId` to `app.json`), then commit that.
+
+The EAS job skips cleanly until the token is set, so it won't fail your pushes.
+GitHub Actions remains the default, fully-decentralised path.
+
 ## Console
 
 After the system is up, the app has an in-app **logs & command console**: type a

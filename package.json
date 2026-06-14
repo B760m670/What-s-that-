@@ -1,0 +1,6 @@
+{
+  "name": "whats-that-linux",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lightweight Ubuntu (XFCE) desktop on Android via proot — EAS project metadata for custom builds."
+}

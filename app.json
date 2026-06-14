@@ -1,0 +1,10 @@
+{
+  "expo": {
+    "name": "What's that? — Linux",
+    "slug": "whats-that-linux",
+    "platforms": ["android"],
+    "android": {
+      "package": "com.whatsthat.linux"
+    }
+  }
+}

@@ -1,0 +1,53 @@
+name: EAS Build
+
+# Triggers an EAS Build (Expo cloud) on every push, producing an installable
+# APK via the custom build config in .eas/build/android-apk.yml.
+#
+# REQUIRED ONE-TIME SETUP (done by you, never committed):
+#   1. In the repo: Settings → Secrets and variables → Actions → New secret
+#        name:  EXPO_TOKEN
+#        value: <your Expo access token>   (rotate the one shared in chat!)
+#   2. Once locally: `npx eas-cli@latest init` to create/link the Expo project
+#      (writes extra.eas.projectId into app.json). Commit that change.
+#
+# Note: this runs alongside build-apk.yml (GitHub Actions native build). Keep
+# whichever you prefer; they don't conflict.
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  eas-build:
+    runs-on: ubuntu-latest
+    # Skip cleanly if no token is configured yet, so pushes don't show as failed.
+    if: ${{ github.event_name == 'workflow_dispatch' || true }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard — require EXPO_TOKEN
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "EXPO_TOKEN secret not set — skipping EAS build."
+            echo "Add it under Settings → Secrets → Actions to enable this job."
+            exit 0
+          fi
+          echo "token_present=true" >> "$GITHUB_ENV"
+
+      - name: Set up Node
+        if: env.token_present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install EAS CLI
+        if: env.token_present == 'true'
+        run: npm install -g eas-cli
+
+      - name: Trigger EAS build (Android, production profile)
+        if: env.token_present == 'true'
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          eas build --platform android --profile production --non-interactive --no-wait

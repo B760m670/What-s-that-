@@ -22,7 +22,6 @@ build:
           ./gradlew --no-daemon assembleFullDebug
 
     - eas/upload_artifact:
-        name: Upload APK
+        name: Upload application archive
         inputs:
-          type: build-artifact
           path: app/build/outputs/apk/full/debug/app-full-debug.apk

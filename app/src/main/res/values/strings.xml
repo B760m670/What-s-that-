@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">What\'s that? — Linux</string>
+    <string name="action_install_ubuntu">Install Ubuntu</string>
+    <string name="action_install_desktop">Install XFCE desktop</string>
+    <string name="action_launch_desktop">Launch desktop</string>
+    <string name="status_arch">Device arch: %1$s</string>
+    <string name="notif_running">Linux session is running</string>
+    <string name="hint_no_vnc_viewer">Desktop is up at %1$s — install a VNC viewer to connect.</string>
+</resources>

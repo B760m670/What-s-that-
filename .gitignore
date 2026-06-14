@@ -1,0 +1,16 @@
+# Android / Gradle
+.gradle/
+build/
+local.properties
+*.apk
+*.aab
+*.keystore
+!debug.keystore
+
+# Prebuilt proot binaries are fetched by tools/fetch-proot.sh, not committed.
+app/src/main/jniLibs/*/libproot.so
+
+# IDE
+.idea/
+*.iml
+.DS_Store

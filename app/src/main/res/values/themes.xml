@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.WhatsThatLinux" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">#E95420</item>      <!-- Ubuntu orange -->
+        <item name="colorPrimaryVariant">#772953</item> <!-- Ubuntu aubergine -->
+        <item name="colorOnPrimary">#FFFFFF</item>
+    </style>
+</resources>

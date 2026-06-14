@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#772953"
+        android:pathData="M0,0h108v108h-108z" />
+    <!-- Stylised question mark — the "What's that?" mark -->
+    <path
+        android:fillColor="#E95420"
+        android:pathData="M54,22c-11,0 -19,7 -20,18h11c1,-5 4,-8 9,-8 5,0 8,3 8,7 0,4 -2,6 -7,9 -6,4 -8,8 -8,15v2h11v-1c0,-4 1,-6 6,-9 7,-4 10,-9 10,-16 0,-10 -8,-17 -20,-17z" />
+    <path
+        android:fillColor="#E95420"
+        android:pathData="M54,72m-7,0a7,7 0,1 1,14 0a7,7 0,1 1,-14 0" />
+</vector>

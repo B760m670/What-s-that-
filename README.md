@@ -58,14 +58,18 @@ launcher** and fetches the OS image on first run. Light APK, full system inside.
 
 ## Get the APK (EAS Build, automatic on push)
 
-Every push triggers an **EAS Build** that produces the installable APK
-(`eas.json` + [`.eas/build/android-apk.yml`](.eas/build/android-apk.yml) +
-[`.github/workflows/eas-build.yml`](.github/workflows/eas-build.yml)). It's a
-**custom build** config (this is a native project, not React Native), so Gradle
-runs `assembleFullDebug` / `assembleLiteDebug` from the repo root.
+Every push triggers an **EAS Build** that compiles the APK on Expo's cloud, and
+the workflow then **downloads that APK and publishes it to a GitHub Release** so
+you get a direct file — no need to open the Expo dashboard:
 
-Download the finished APK from the build's page on your **Expo dashboard**
-(expo.dev → your project → Builds), which gives a phone-friendly link / QR.
+- **`latest-apk`** pre-release on the repo's Releases page →
+  `whats-that-linux.apk` (tap to install on your phone), or
+- the **Artifacts** of the EAS Build run under the Actions tab.
+
+It's an EAS **custom build** config (this is a native project, not React
+Native), so Gradle runs `assembleFullDebug` from the repo root
+(`eas.json` + [`.eas/build/android-apk.yml`](.eas/build/android-apk.yml) +
+[`.github/workflows/eas-build.yml`](.github/workflows/eas-build.yml)).
 
 ### One-time setup
 

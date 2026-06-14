@@ -14,6 +14,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write   # to publish the APK to a GitHub Release
+
 jobs:
   eas-build:
     runs-on: ubuntu-latest
@@ -51,7 +54,9 @@ jobs:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: eas init --non-interactive --force || true
 
-      - name: Trigger EAS build (Android, production profile)
+      # Run the EAS build and WAIT for it, capturing the build JSON so we can
+      # grab the finished APK's download URL.
+      - name: Build APK on EAS and capture result
         if: env.token_present == 'true'
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
@@ -60,4 +65,44 @@ jobs:
           EAS_BUILD_SKIP_LOCKFILE_CHECK: '1'
           EAS_BUILD_NO_EXPO_GO_WARNING: 'true'
         run: |
-          eas build --platform android --profile production --non-interactive --no-wait
+          set -o pipefail
+          eas build --platform android --profile production \
+            --non-interactive --wait --json > build.json
+          cat build.json
+
+      # Pull the APK URL out of the build JSON (field name has varied across
+      # eas-cli versions, so search recursively) and download the file.
+      - name: Download the built APK
+        if: env.token_present == 'true'
+        run: |
+          URL=$(jq -r '[.. | objects | (.applicationArchiveUrl // .buildUrl // empty)]
+                       | map(select(. != null and . != "")) | .[0]' build.json)
+          echo "Artifact URL: $URL"
+          if [ -z "$URL" ] || [ "$URL" = "null" ]; then
+            echo "Could not find APK URL in build output." >&2
+            exit 1
+          fi
+          curl -L --fail -o whats-that-linux.apk "$URL"
+          ls -la whats-that-linux.apk
+          file whats-that-linux.apk || true
+
+      - name: Upload APK as workflow artifact
+        if: env.token_present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: whats-that-linux-apk
+          path: whats-that-linux.apk
+          if-no-files-found: error
+
+      # Phone-friendly direct download link that always points at the newest build.
+      - name: Publish APK to a rolling GitHub Release
+        if: env.token_present == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-apk
+          name: Latest APK
+          prerelease: true
+          files: whats-that-linux.apk
+          body: |
+            Built on EAS from commit `${{ github.sha }}` and published here for a
+            direct download. Install `whats-that-linux.apk` on your Android phone.

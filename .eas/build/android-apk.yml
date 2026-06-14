@@ -1,8 +1,11 @@
 # EAS Build custom build config for this NATIVE (non-React-Native) project.
 # EAS normally runs Gradle inside an `android/` subdir; our Gradle project lives
 # at the repo root, so each step sets working_directory accordingly.
+#
+# Produces a single installable APK (full XFCE profile) as the build artifact,
+# so the artifact URL is a plain .apk the CI can download and publish.
 build:
-  name: Build What's that? — Linux (full + lite debug APKs)
+  name: Build What's that? — Linux (full debug APK)
   steps:
     - eas/checkout
 
@@ -13,13 +16,13 @@ build:
           ./tools/fetch-proot.sh
 
     - run:
-        name: Assemble full + lite debug APKs
+        name: Assemble full debug APK
         command: |
           chmod +x gradlew
-          ./gradlew --no-daemon assembleFullDebug assembleLiteDebug
+          ./gradlew --no-daemon assembleFullDebug
 
     - eas/upload_artifact:
-        name: Upload APKs
+        name: Upload APK
         inputs:
           type: build-artifact
-          path: app/build/outputs/**/*.apk
+          path: app/build/outputs/apk/full/debug/app-full-debug.apk

@@ -56,33 +56,24 @@ launcher** and fetches the OS image on first run. Light APK, full system inside.
 | `app/src/main/assets/scripts/start-desktop.sh` | Starts XFCE on a VNC display |
 | `tools/fetch-proot.sh` | Pulls prebuilt `proot` binaries into `jniLibs/` |
 
-## Get the APK (EAS Build, automatic on push)
+## Get the APK (automatic on push)
 
-Every push triggers an **EAS Build** that compiles the APK on Expo's cloud, and
-the workflow then **downloads that APK and publishes it to a GitHub Release** so
-you get a direct file — no need to open the Expo dashboard:
+Every push triggers a **GitHub Actions** build
+([`.github/workflows/build-apk.yml`](.github/workflows/build-apk.yml)) that
+compiles the APK on GitHub's runners (Android SDK preinstalled) — fast, no
+third-party queue or build limits — and publishes it for direct download:
 
 - **`latest-apk`** pre-release on the repo's Releases page →
   `whats-that-linux.apk` (tap to install on your phone), or
-- the **Artifacts** of the EAS Build run under the Actions tab.
+- the **Artifacts** of the Build APK run under the Actions tab.
 
-It's an EAS **custom build** config (this is a native project, not React
-Native), so Gradle runs `assembleFullDebug` from the repo root
-(`eas.json` + [`.eas/build/android-apk.yml`](.eas/build/android-apk.yml) +
-[`.github/workflows/eas-build.yml`](.github/workflows/eas-build.yml)).
+The APK is signed with the committed `app/debug.keystore`, so its signature is
+stable across builds: the in-app updater installs new versions **over the top**
+without uninstalling (preserving the multi-GB rootfs). No secrets or accounts
+needed.
 
-### One-time setup
-
-1. Add an `EXPO_TOKEN` repo secret (Settings → Secrets → Actions). **Never
-   commit the token.**
-2. Link the Expo project so it has a `projectId`. The workflow attempts this
-   automatically (`eas init --non-interactive --force`); if your account needs
-   it done by hand, run once locally and commit:
-   ```bash
-   npx eas-cli@latest init   # writes extra.eas.projectId into app.json
-   ```
-
-The EAS job skips cleanly until the token is set, so it won't fail your pushes.
+> An EAS Build config (`eas.json`, `.eas/`) is kept in the repo for optional use
+> on Expo's cloud, but the default pipeline is GitHub Actions.
 
 ## Console
 

@@ -1,0 +1,65 @@
+name: Build APK
+
+# Builds the installable APK directly on GitHub's runners (Android SDK
+# preinstalled) on every push — fast, no third-party queue or build limits.
+# Signed with the committed debug.keystore, so its signature matches every other
+# build and the in-app updater installs over the top. Publishes the APK +
+# version marker to the rolling `latest-apk` release for direct download and
+# self-update.
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # to publish the rolling release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Fetch proot engine binaries
+        run: |
+          chmod +x tools/fetch-proot.sh
+          ./tools/fetch-proot.sh
+
+      - name: Build full debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon -PgitSha="${{ github.sha }}" assembleFullDebug
+
+      - name: Collect APK + version marker
+        run: |
+          cp app/build/outputs/apk/full/debug/app-full-debug.apk whats-that-linux.apk
+          echo -n "${{ github.sha }}" > version.txt
+          ls -la whats-that-linux.apk
+
+      - name: Upload APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: whats-that-linux-apk
+          path: whats-that-linux.apk
+          if-no-files-found: error
+
+      - name: Publish APK to a rolling GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-apk
+          name: Latest APK
+          prerelease: true
+          files: |
+            whats-that-linux.apk
+            version.txt
+          body: |
+            Built on GitHub Actions from commit `${{ github.sha }}`.
+            Install `whats-that-linux.apk`; the installed app self-updates from here.

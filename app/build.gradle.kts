@@ -30,6 +30,20 @@ android {
         }
     }
 
+    // A committed, fixed debug keystore so every build (EAS, CI, local) signs
+    // with the SAME certificate. Without this, each environment generates its
+    // own debug key → different signature → Android refuses in-place updates and
+    // the user must uninstall (wiping the multi-GB rootfs). These are the
+    // well-known public debug credentials; nothing secret.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false

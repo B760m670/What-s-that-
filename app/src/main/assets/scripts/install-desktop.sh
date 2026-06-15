@@ -45,6 +45,11 @@ apt-get update -y || apt-get update -y || apt-get update -y || \
 
 rm -f /etc/apt/apt.conf.d/81-nocache   # package downloads may use the fast CDN cache
 
+# Recover from any prior interrupted install (e.g. a run before --link2symlink
+# fixed dpkg's hardlink failures left packages half-unpacked).
+dpkg --configure -a || true
+apt-get install -f -y || true
+
 echo "[install] Installing base utilities..."
 apt-get install -y --no-install-recommends \
     ca-certificates curl wget nano less sudo \

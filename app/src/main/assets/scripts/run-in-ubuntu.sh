@@ -26,13 +26,16 @@ if [ -n "${WT_NATIVE_LIB:-}" ]; then
     [ -f "$WT_NATIVE_LIB/libloader32.so" ] && export PROOT_LOADER_32="$WT_NATIVE_LIB/libloader32.so"
 fi
 
-# Flags kept to the subset shared by Termux proot and upstream proot, so the
-# same wrapper works on-device and in tests:
+# proot flags (Termux proot):
+#   --link2symlink  emulate hardlinks as symlinks — ESSENTIAL: Android's app
+#                   filesystem refuses hardlinks, which breaks dpkg/apt (they
+#                   create backup hardlinks). proot-distro relies on this too.
 #   -0  run as fake root        -r  guest rootfs
 #   -w  initial working dir     -b  bind host paths into the guest
 # (We deliberately do NOT pass --kill-on-exit: the VNC server must survive
 #  after start-desktop.sh's proot invocation returns.)
 exec "$PROOT" \
+    --link2symlink \
     -0 \
     -r "$ROOTFS" \
     -w /root \

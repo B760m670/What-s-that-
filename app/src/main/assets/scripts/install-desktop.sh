@@ -14,18 +14,19 @@ PROFILE="${WT_PROFILE:-full}"
 
 echo "[install] Profile: $PROFILE"
 
-# The CDN in front of ports.ubuntu.com intermittently mis-serves the changing
-# -updates/-security/-backports pockets ("File has unexpected size / Mirror sync
-# in progress"). The base 'jammy' pocket is frozen post-release, consistent, and
-# carries the full XFCE desktop — so drop the flaky pockets for a clean install.
-for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
-    [ -f "$f" ] && sed -i -E '/jammy-(updates|security|backports)/d' "$f" || true
-done
+# The cloud image ships pre-seeded apt lists from when it was built (weeks old)
+# and already has -updates/-security packages installed — so we must KEEP all
+# pockets (XFCE's deps pin to those installed versions). The "File has unexpected
+# size" errors came from Cloudflare serving a stale cached InRelease against a
+# newer Packages index. Fix it by dropping the stale lists and forcing the CDN to
+# revalidate from origin (No-Cache) so InRelease + indexes are consistent.
+rm -rf /var/lib/apt/lists/*
 mkdir -p /etc/apt/apt.conf.d
-echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries
+printf 'Acquire::Retries "5";\nAcquire::http::No-Cache "true";\nAcquire::https::No-Cache "true";\n' \
+    > /etc/apt/apt.conf.d/80-wt
 
 echo "[install] Updating package lists..."
-apt-get update -y || apt-get update -y || \
+apt-get update -y || apt-get update -y || apt-get update -y || \
     echo "[install] apt update had partial errors — continuing with available indexes."
 
 echo "[install] Installing base utilities..."

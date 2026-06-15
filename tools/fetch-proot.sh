@@ -10,6 +10,7 @@
 #   libloader.so      <- usr/libexec/proot/loader        (PROOT_LOADER)
 #   libloader32.so    <- usr/libexec/proot/loader32      (PROOT_LOADER_32, if any)
 #   libtalloc.so      <- real libtalloc.so.2.x  (symlinked to libtalloc.so.2 at runtime)
+#   libandroid-shmem.so <- usr/lib/libandroid-shmem.so   (SysV shm shim)
 #
 # Run from the repo root. Requires: curl, and dpkg-deb OR ar+tar.
 set -euo pipefail
@@ -63,23 +64,34 @@ for abi in "${!ABI_TO_ARCH[@]}"; do
 
     proot_deb="$(fetch_deb proot "$arch")" || continue
     talloc_deb="$(fetch_deb libtalloc "$arch")" || continue
+    shmem_deb="$(fetch_deb libandroid-shmem "$arch")" || continue
 
-    pe="$WORK/pe_$abi"; te="$WORK/te_$abi"
+    pe="$WORK/pe_$abi"; te="$WORK/te_$abi"; se="$WORK/se_$abi"
     extract_deb "$proot_deb" "$pe"
     extract_deb "$talloc_deb" "$te"
+    extract_deb "$shmem_deb" "$se"
 
     proot_bin="$(find "$pe" -path '*/bin/proot' -type f | head -1)"
     loader="$(find "$pe" -path '*/libexec/proot/loader' -type f | head -1)"
     loader32="$(find "$pe" -path '*/libexec/proot/loader32' -type f | head -1)"
     talloc="$(find "$te" -name 'libtalloc.so.2*' -type f | head -1)"
+    shmem="$(find "$se" -name 'libandroid-shmem.so' -type f | head -1)"
 
     [ -n "$proot_bin" ] || { echo "!! proot binary missing for $abi" >&2; exit 1; }
     [ -n "$talloc" ]    || { echo "!! libtalloc missing for $abi" >&2; exit 1; }
+    [ -n "$shmem" ]     || { echo "!! libandroid-shmem missing for $abi" >&2; exit 1; }
 
     install -Dm755 "$proot_bin" "$out/libproot.so"
     install -Dm755 "$talloc"    "$out/libtalloc.so"
+    install -Dm755 "$shmem"     "$out/libandroid-shmem.so"
     [ -n "$loader" ]   && install -Dm755 "$loader"   "$out/libloader.so"
     [ -n "$loader32" ] && install -Dm755 "$loader32" "$out/libloader32.so"
+
+    # Diagnostic: show proot's shared-lib dependencies so any still-missing one
+    # is visible in the build log (we already bundle libtalloc + libandroid-shmem).
+    if command -v readelf >/dev/null 2>&1; then
+        echo "    proot NEEDED:"; readelf -d "$out/libproot.so" 2>/dev/null | grep NEEDED || true
+    fi
     found_any=1
 done
 

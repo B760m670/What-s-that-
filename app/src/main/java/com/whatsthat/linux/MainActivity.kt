@@ -70,7 +70,7 @@ class MainActivity : AppCompatActivity() {
             !env.isDesktopInstalled -> getString(R.string.action_install_desktop)
             else -> getString(R.string.action_launch_desktop)
         }
-        binding.statusText.text = getString(R.string.status_arch, env.arch)
+        binding.statusText.text = getString(R.string.status_arch, env.arch, BuildConfig.GIT_SHA.take(7))
     }
 
     private fun onAction() {

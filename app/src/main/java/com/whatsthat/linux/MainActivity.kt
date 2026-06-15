@@ -76,21 +76,22 @@ class MainActivity : AppCompatActivity() {
     private fun onAction() {
         setBusy(true)
         lifecycleScope.launch {
+            var endpoint: String? = null
             val result = withContext(Dispatchers.IO) {
                 when {
-                    !env.isBootstrapped -> env.bootstrap(::appendLog).let { Step.BOOTSTRAP to it }
-                    !env.isDesktopInstalled -> env.installDesktop(::appendLog).let { Step.DESKTOP to it }
+                    !env.isBootstrapped -> Step.BOOTSTRAP to env.bootstrap(::appendLog)
+                    !env.isDesktopInstalled -> Step.DESKTOP to env.installDesktop(::appendLog)
                     else -> {
-                        val endpoint = env.startDesktop("1280x720", ::appendLog)
-                        Step.LAUNCH to (if (endpoint != null) 0 else 1).also {
-                            if (endpoint != null) launchVncViewer(endpoint)
-                        }
+                        endpoint = env.startDesktop("1280x720", ::appendLog)
+                        Step.LAUNCH to (if (endpoint != null) 0 else 1)
                     }
                 }
             }
             appendLog(if (result.second == 0) "✓ ${result.first} ok" else "✗ ${result.first} failed (${result.second})")
             setBusy(false)
             refreshState()
+            // Must launch the activity from the main thread (we're back on it here).
+            endpoint?.let { launchVncViewer(it) }
         }
     }
 
@@ -100,8 +101,12 @@ class MainActivity : AppCompatActivity() {
         val parts = endpoint.split(":")
         val host = parts.getOrElse(0) { "127.0.0.1" }
         val port = parts.getOrNull(1)?.toIntOrNull() ?: 5901
-        ContextCompat.startForegroundService(this, Intent(this, LinuxSessionService::class.java))
-        VncActivity.start(this, host, port)
+        appendLog("Opening desktop viewer ($host:$port)…")
+        // A foreground-service failure must not block the viewer from opening.
+        runCatching { ContextCompat.startForegroundService(this, Intent(this, LinuxSessionService::class.java)) }
+            .onFailure { appendLog("(session service not started: ${it.message})") }
+        runCatching { VncActivity.start(this, host, port) }
+            .onFailure { appendLog("Could not open viewer: ${it.message}") }
     }
 
     private fun setBusy(busy: Boolean) {

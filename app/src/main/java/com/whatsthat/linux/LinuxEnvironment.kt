@@ -90,16 +90,43 @@ class LinuxEnvironment(context: Context) {
         )
 
     /**
-     * Start the XFCE/VNC session. Returns the loopback "host:port" the viewer
-     * should connect to, or null on failure.
+     * Start the XFCE/VNC session and return the loopback "host:port" to connect
+     * to, or null on failure. The VNC server is a long-lived process, so we must
+     * NOT wait for it to exit — we read its output only until it announces
+     * VNC_READY, then leave it running in the background (a daemon thread keeps
+     * draining its output so it never blocks on a full pipe).
      */
     fun startDesktop(geometry: String, onLog: (String) -> Unit): String? {
+        stopDesktop()
+        val pb = ProcessBuilder(containerCommand("start-desktop.sh")).redirectErrorStream(true)
+        configureEnv(pb, mapOf("WT_GEOMETRY" to geometry))
+        val process = pb.start()
+        desktopProcess = process
+        val reader = process.inputStream.bufferedReader()
+
         var endpoint: String? = null
-        execScript("start-desktop.sh", insideContainer = true, extraEnv = mapOf("WT_GEOMETRY" to geometry)) { line ->
+        val deadline = System.currentTimeMillis() + 90_000
+        while (System.currentTimeMillis() < deadline) {
+            val line = reader.readLine() ?: break          // EOF = process exited early
             onLog(line)
-            line.substringAfter("VNC_READY ", "").trim().takeIf { it.isNotEmpty() }?.let { endpoint = it }
+            val ep = line.substringAfter("VNC_READY ", "").trim()
+            if (ep.isNotEmpty()) { endpoint = ep; break }
+        }
+
+        if (endpoint != null) {
+            // Keep the session alive; drain its remaining output off-thread.
+            Thread { runCatching { reader.forEachLine(onLog) } }
+                .apply { isDaemon = true; start() }
+        } else {
+            stopDesktop()
         }
         return endpoint
+    }
+
+    /** Stop a running desktop/VNC session, if any. */
+    fun stopDesktop() {
+        desktopProcess?.let { runCatching { it.destroy() } }
+        desktopProcess = null
     }
 
     /**
@@ -122,25 +149,19 @@ class LinuxEnvironment(context: Context) {
 
     // --- internals -----------------------------------------------------------
 
-    private fun execScript(
-        name: String,
-        insideContainer: Boolean,
-        extraEnv: Map<String, String> = emptyMap(),
-        onLog: (String) -> Unit,
-    ): Int {
-        val script = File(scriptsDir, name).absolutePath
-        val command: List<String> = if (insideContainer) {
-            // Pipe the desktop script through the proot wrapper into bash.
-            listOf("/system/bin/sh", File(scriptsDir, "run-in-ubuntu.sh").absolutePath, "/bin/bash", "-c",
-                "cat << 'WT_EOF' | bash\n${File(script).readText()}\nWT_EOF")
-        } else {
-            listOf("/system/bin/sh", script)
-        }
-        return exec(command, extraEnv, onLog)
+    /** The running desktop/VNC session process (long-lived), if started. */
+    private var desktopProcess: Process? = null
+
+    /** Build the command that pipes a bundled script through proot into bash. */
+    private fun containerCommand(scriptName: String): List<String> {
+        val script = File(scriptsDir, scriptName)
+        return listOf(
+            "/system/bin/sh", File(scriptsDir, "run-in-ubuntu.sh").absolutePath, "/bin/bash", "-c",
+            "cat << 'WT_EOF' | bash\n${script.readText()}\nWT_EOF",
+        )
     }
 
-    private fun exec(command: List<String>, extraEnv: Map<String, String>, onLog: (String) -> Unit): Int {
-        val pb = ProcessBuilder(command).redirectErrorStream(true)
+    private fun configureEnv(pb: ProcessBuilder, extraEnv: Map<String, String>) {
         pb.environment().apply {
             put("WT_HOME", home.absolutePath)
             put("WT_ARCH", arch)
@@ -152,6 +173,25 @@ class LinuxEnvironment(context: Context) {
             put("PATH", "${scriptsDir.absolutePath}:/system/bin:/system/xbin")
             putAll(extraEnv)
         }
+    }
+
+    private fun execScript(
+        name: String,
+        insideContainer: Boolean,
+        extraEnv: Map<String, String> = emptyMap(),
+        onLog: (String) -> Unit,
+    ): Int {
+        val command: List<String> = if (insideContainer) {
+            containerCommand(name)
+        } else {
+            listOf("/system/bin/sh", File(scriptsDir, name).absolutePath)
+        }
+        return exec(command, extraEnv, onLog)
+    }
+
+    private fun exec(command: List<String>, extraEnv: Map<String, String>, onLog: (String) -> Unit): Int {
+        val pb = ProcessBuilder(command).redirectErrorStream(true)
+        configureEnv(pb, extraEnv)
         val process = pb.start()
         process.inputStream.bufferedReader().forEachLine(onLog)
         return process.waitFor()

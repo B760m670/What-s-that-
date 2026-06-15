@@ -14,10 +14,13 @@ PROFILE="${WT_PROFILE:-full}"
 
 echo "[install] Profile: $PROFILE"
 
-# Flaky CDN mirrors occasionally serve mismatched index sizes ("Mirror sync in
-# progress"). Retry transient fetches, and don't abort the whole install if some
-# optional pockets (jammy-updates/security) fail — the base jammy indexes that
-# carry XFCE download fine and are enough.
+# The CDN in front of ports.ubuntu.com intermittently mis-serves the changing
+# -updates/-security/-backports pockets ("File has unexpected size / Mirror sync
+# in progress"). The base 'jammy' pocket is frozen post-release, consistent, and
+# carries the full XFCE desktop — so drop the flaky pockets for a clean install.
+for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
+    [ -f "$f" ] && sed -i -E '/jammy-(updates|security|backports)/d' "$f" || true
+done
 mkdir -p /etc/apt/apt.conf.d
 echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries
 

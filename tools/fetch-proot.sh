@@ -1,69 +1,87 @@
 #!/usr/bin/env bash
-# fetch-proot.sh — populate app/src/main/jniLibs/<abi>/libproot.so
+# fetch-proot.sh — populate app/src/main/jniLibs/<abi>/ with proot + its deps.
 #
-# proot is the open-source (GPLv2) engine that runs the Ubuntu rootfs without
-# root. We reuse the prebuilt binaries from the Termux project rather than
-# cross-compiling, then drop them in as native libs so Android's installer
-# marks them executable. Re-run when bumping the proot version.
+# Termux's proot is dynamically linked (needs libtalloc.so.2) and uses an
+# external loader, so a standalone APK must ship all the pieces. We grab them
+# from Termux's prebuilt .deb packages and drop them in as native libs (lib*.so)
+# so Android extracts them, executable, into nativeLibraryDir:
 #
-# Robust extraction: Termux .deb data members may be compressed with xz, gzip
-# or zstd, so prefer `dpkg-deb -x` and fall back to ar + tar (any inner
-# compression). Run from the repo root. Requires: curl, and dpkg-deb OR ar+tar.
+#   libproot.so       <- usr/bin/proot
+#   libloader.so      <- usr/libexec/proot/loader        (PROOT_LOADER)
+#   libloader32.so    <- usr/libexec/proot/loader32      (PROOT_LOADER_32, if any)
+#   libtalloc.so      <- real libtalloc.so.2.x  (symlinked to libtalloc.so.2 at runtime)
+#
+# Run from the repo root. Requires: curl, and dpkg-deb OR ar+tar.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 JNILIBS="$REPO_ROOT/app/src/main/jniLibs"
-TERMUX_POOL="https://packages.termux.dev/apt/termux-main/pool/main/p/proot"
+POOL="https://packages.termux.dev/apt/termux-main/pool/main"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-# Map Android ABI dir  ->  Termux package arch.
+# Android ABI dir -> Termux package arch.
 declare -A ABI_TO_ARCH=(
     [arm64-v8a]=aarch64
     [armeabi-v7a]=arm
     [x86_64]=x86_64
 )
 
-extract_deb() {  # $1=deb path  $2=dest dir
+extract_deb() {  # $1=deb  $2=dest
     mkdir -p "$2"
     if command -v dpkg-deb >/dev/null 2>&1; then
         dpkg-deb -x "$1" "$2"
-        return
+    else
+        ( cd "$2" && ar x "$1" )
+        tar -xf "$2"/data.tar.* -C "$2"
     fi
-    # Fallback: ar + tar, handling whatever compression the data member uses.
-    ( cd "$2" && ar x "$1" )
-    local data
-    data="$(find "$2" -maxdepth 1 -name 'data.tar.*' | head -1)"
-    tar -xf "$data" -C "$2"
 }
 
-echo "Resolving latest proot package from Termux..."
-INDEX="$(curl -fsSL "$TERMUX_POOL/")"
+pool_dir() {  # debian pool prefix: lib* -> first 4 chars, else first char
+    case "$1" in
+        lib*) printf '%s' "${1:0:4}" ;;
+        *)    printf '%s' "${1:0:1}" ;;
+    esac
+}
+
+# Download the newest .deb for a package+arch into $WORK and echo its path.
+fetch_deb() {  # $1=pkg  $2=arch
+    local pkg="$1" arch="$2" dir deb
+    dir="$(pool_dir "$pkg")"
+    local index; index="$(curl -fsSL "$POOL/$dir/$pkg/")"
+    deb="$(printf '%s\n' "$index" | grep -oE "${pkg}_[^\"]*_${arch}\.deb" | sort -V | tail -1 || true)"
+    [ -n "$deb" ] || { echo "!! no $pkg .deb for $arch" >&2; return 1; }
+    curl -fsSL -o "$WORK/$deb" "$POOL/$dir/$pkg/$deb"
+    printf '%s' "$WORK/$deb"
+}
 
 found_any=0
 for abi in "${!ABI_TO_ARCH[@]}"; do
     arch="${ABI_TO_ARCH[$abi]}"
-    deb="$(printf '%s\n' "$INDEX" | grep -oE "proot_[^\"]*_${arch}\.deb" | sort -V | tail -1 || true)"
-    if [ -z "$deb" ]; then
-        echo "!! Could not find proot .deb for $arch — skipping $abi" >&2
-        continue
-    fi
-    echo "==> $abi : $deb"
-    curl -fsSL -o "$WORK/$deb" "$TERMUX_POOL/$deb"
-    dest="$WORK/x_$abi"
-    extract_deb "$WORK/$deb" "$dest"
-    # Termux installs to data/data/com.termux/files/usr/bin/proot
-    src="$(find "$dest" -path '*/bin/proot' -type f | head -1)"
-    if [ -z "$src" ]; then
-        echo "!! proot binary not found inside $deb" >&2
-        exit 1
-    fi
-    install -Dm755 "$src" "$JNILIBS/$abi/libproot.so"
+    echo "==> $abi ($arch)"
+    out="$JNILIBS/$abi"; mkdir -p "$out"
+
+    proot_deb="$(fetch_deb proot "$arch")" || continue
+    talloc_deb="$(fetch_deb libtalloc "$arch")" || continue
+
+    pe="$WORK/pe_$abi"; te="$WORK/te_$abi"
+    extract_deb "$proot_deb" "$pe"
+    extract_deb "$talloc_deb" "$te"
+
+    proot_bin="$(find "$pe" -path '*/bin/proot' -type f | head -1)"
+    loader="$(find "$pe" -path '*/libexec/proot/loader' -type f | head -1)"
+    loader32="$(find "$pe" -path '*/libexec/proot/loader32' -type f | head -1)"
+    talloc="$(find "$te" -name 'libtalloc.so.2*' -type f | head -1)"
+
+    [ -n "$proot_bin" ] || { echo "!! proot binary missing for $abi" >&2; exit 1; }
+    [ -n "$talloc" ]    || { echo "!! libtalloc missing for $abi" >&2; exit 1; }
+
+    install -Dm755 "$proot_bin" "$out/libproot.so"
+    install -Dm755 "$talloc"    "$out/libtalloc.so"
+    [ -n "$loader" ]   && install -Dm755 "$loader"   "$out/libloader.so"
+    [ -n "$loader32" ] && install -Dm755 "$loader32" "$out/libloader32.so"
     found_any=1
 done
 
-if [ "$found_any" != 1 ]; then
-    echo "ERROR: no proot binaries were fetched." >&2
-    exit 1
-fi
-echo "Done. proot binaries placed under $JNILIBS/*/libproot.so"
+[ "$found_any" = 1 ] || { echo "ERROR: nothing fetched." >&2; exit 1; }
+echo "Done. proot + deps placed under $JNILIBS/*/"

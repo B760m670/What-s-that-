@@ -16,6 +16,16 @@ if [ ! -f "$ROOTFS/.bootstrap-done" ]; then
     exit 1
 fi
 
+# proot (Termux build) is dynamically linked and uses an external loader. Make
+# its shared lib (libtalloc.so.2, via the symlink in WT_LIBDIR) and loader
+# discoverable for the host-side proot process. These affect proot itself, not
+# the guest (the guest env is wiped by `env -i` below).
+if [ -n "${WT_NATIVE_LIB:-}" ]; then
+    export LD_LIBRARY_PATH="${WT_LIBDIR:-}:${WT_NATIVE_LIB}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    [ -f "$WT_NATIVE_LIB/libloader.so" ]   && export PROOT_LOADER="$WT_NATIVE_LIB/libloader.so"
+    [ -f "$WT_NATIVE_LIB/libloader32.so" ] && export PROOT_LOADER_32="$WT_NATIVE_LIB/libloader32.so"
+fi
+
 # Flags kept to the subset shared by Termux proot and upstream proot, so the
 # same wrapper works on-device and in tests:
 #   -0  run as fake root        -r  guest rootfs

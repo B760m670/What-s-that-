@@ -8,8 +8,8 @@ local.properties
 *.keystore
 !debug.keystore
 
-# Prebuilt proot binaries are fetched by tools/fetch-proot.sh, not committed.
-app/src/main/jniLibs/*/libproot.so
+# Prebuilt proot + deps are fetched by tools/fetch-proot.sh, not committed.
+app/src/main/jniLibs/*/*.so
 
 # Node / EAS
 node_modules/

@@ -17,9 +17,15 @@ class LinuxEnvironment(context: Context) {
     private val scriptsDir = File(home, "scripts")
     private val rootfs = File(home, "ubuntu")
 
+    /** Where Android extracted our native libs (proot, loader, libtalloc). */
+    private val nativeLibDir = File(appContext.applicationInfo.nativeLibraryDir)
+
+    /** A writable dir holding the soname symlink the dynamic linker expects. */
+    private val libDir = File(home, "lib")
+
     /** proot is shipped as a native lib so Android marks it executable on install. */
     private val prootBinary: File
-        get() = File(appContext.applicationInfo.nativeLibraryDir, "libproot.so")
+        get() = File(nativeLibDir, "libproot.so")
 
     /** CPU arch in the naming the bootstrap script expects. */
     val arch: String = when (Build.SUPPORTED_ABIS.firstOrNull()) {
@@ -43,6 +49,22 @@ class LinuxEnvironment(context: Context) {
                 target.outputStream().use { input.copyTo(it) }
             }
             target.setExecutable(true, false)
+        }
+        linkProotDeps()
+    }
+
+    /**
+     * proot's ELF asks for `libtalloc.so.2` by soname, but Android only extracts
+     * native libs named `lib*.so` (we ship it as `libtalloc.so`). Create a
+     * `libtalloc.so.2` symlink in a writable dir that we put on LD_LIBRARY_PATH.
+     */
+    private fun linkProotDeps() {
+        libDir.mkdirs()
+        val link = File(libDir, "libtalloc.so.2")
+        val realLib = File(nativeLibDir, "libtalloc.so")
+        runCatching {
+            link.delete()   // removes a stale symlink (the link, not its target)
+            android.system.Os.symlink(realLib.absolutePath, link.absolutePath)
         }
     }
 
@@ -124,6 +146,8 @@ class LinuxEnvironment(context: Context) {
             put("WT_ARCH", arch)
             put("PROOT", prootBinary.absolutePath)
             put("PROOT_TMP_DIR", File(home, "tmp").absolutePath)
+            put("WT_NATIVE_LIB", nativeLibDir.absolutePath)
+            put("WT_LIBDIR", libDir.absolutePath)
             put("HOME", home.absolutePath)
             put("PATH", "${scriptsDir.absolutePath}:/system/bin:/system/xbin")
             putAll(extraEnv)

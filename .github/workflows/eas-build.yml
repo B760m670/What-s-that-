@@ -85,6 +85,8 @@ jobs:
           curl -L --fail -o whats-that-linux.apk "$URL"
           ls -la whats-that-linux.apk
           file whats-that-linux.apk || true
+          # Version marker the in-app updater compares against its embedded SHA.
+          echo -n "${{ github.sha }}" > version.txt
 
       - name: Upload APK as workflow artifact
         if: env.token_present == 'true'
@@ -102,7 +104,10 @@ jobs:
           tag_name: latest-apk
           name: Latest APK
           prerelease: true
-          files: whats-that-linux.apk
+          files: |
+            whats-that-linux.apk
+            version.txt
           body: |
             Built on EAS from commit `${{ github.sha }}` and published here for a
             direct download. Install `whats-that-linux.apk` on your Android phone.
+            The installed app self-updates from this release.

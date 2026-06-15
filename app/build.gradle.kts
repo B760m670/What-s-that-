@@ -10,9 +10,17 @@ android {
     defaultConfig {
         applicationId = "com.whatsthat.linux"
         minSdk = 21          // Android 5.0 Lollipop — oldest supported
-        targetSdk = 34
+        // targetSdk 28 on purpose: API 29+ enforces W^X (no executing files from
+        // app-writable storage), which would block proot from running the guest
+        // Ubuntu binaries. Termux/UserLAnd cap here for the same reason.
+        targetSdk = 28
         versionCode = 1
         versionName = "0.1.0"
+
+        // Commit the app was built from, for the in-app self-updater. CI passes
+        // -PgitSha=<commit>; local builds fall back to "dev".
+        val gitSha = (project.findProperty("gitSha") as String?)?.takeIf { it.isNotBlank() } ?: "dev"
+        buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
 
         // The Ubuntu rootfs is downloaded on first launch (keeps the APK light),
         // so the APK itself only carries the launcher + bootstrap scripts.

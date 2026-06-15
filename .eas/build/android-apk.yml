@@ -19,7 +19,9 @@ build:
         name: Assemble full debug APK
         command: |
           chmod +x gradlew
-          ./gradlew --no-daemon assembleFullDebug
+          SHA="${EAS_BUILD_GIT_COMMIT_HASH:-$(git rev-parse HEAD 2>/dev/null || echo dev)}"
+          echo "Building from commit $SHA"
+          ./gradlew --no-daemon -PgitSha="$SHA" assembleFullDebug
 
     - eas/upload_artifact:
         name: Upload application archive

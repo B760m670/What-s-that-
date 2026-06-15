@@ -32,6 +32,22 @@ class MainActivity : AppCompatActivity() {
         binding.actionButton.setOnClickListener { onAction() }
         binding.runButton.setOnClickListener { runConsoleCommand() }
         binding.cmdInput.setOnEditorActionListener { _, _, _ -> runConsoleCommand(); true }
+
+        checkForUpdates()
+    }
+
+    /** On launch, see if CI published a newer APK; if so, fetch + offer to install. */
+    private fun checkForUpdates() {
+        lifecycleScope.launch {
+            val available = withContext(Dispatchers.IO) { Updater.isUpdateAvailable() }
+            if (!available) return@launch
+            appendLog("A new version is available.")
+            val apk = withContext(Dispatchers.IO) { Updater.downloadApk(this@MainActivity, ::appendLog) }
+            if (apk != null) {
+                appendLog("Tap to install the update.")
+                Updater.install(this@MainActivity, apk)
+            }
+        }
     }
 
     /** Run whatever the user typed in the console, inside the container. */

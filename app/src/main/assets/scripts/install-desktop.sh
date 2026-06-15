@@ -13,8 +13,17 @@ export DEBIAN_FRONTEND=noninteractive
 PROFILE="${WT_PROFILE:-full}"
 
 echo "[install] Profile: $PROFILE"
+
+# Flaky CDN mirrors occasionally serve mismatched index sizes ("Mirror sync in
+# progress"). Retry transient fetches, and don't abort the whole install if some
+# optional pockets (jammy-updates/security) fail — the base jammy indexes that
+# carry XFCE download fine and are enough.
+mkdir -p /etc/apt/apt.conf.d
+echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries
+
 echo "[install] Updating package lists..."
-apt-get update -y
+apt-get update -y || apt-get update -y || \
+    echo "[install] apt update had partial errors — continuing with available indexes."
 
 echo "[install] Installing base utilities..."
 apt-get install -y --no-install-recommends \

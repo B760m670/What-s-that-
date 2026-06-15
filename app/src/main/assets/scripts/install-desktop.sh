@@ -14,20 +14,36 @@ PROFILE="${WT_PROFILE:-full}"
 
 echo "[install] Profile: $PROFILE"
 
-# The cloud image ships pre-seeded apt lists from when it was built (weeks old)
-# and already has -updates/-security packages installed — so we must KEEP all
-# pockets (XFCE's deps pin to those installed versions). The "File has unexpected
-# size" errors came from Cloudflare serving a stale cached InRelease against a
-# newer Packages index. Fix it by dropping the stale lists and forcing the CDN to
-# revalidate from origin (No-Cache) so InRelease + indexes are consistent.
+# Rewrite a complete, correct sources.list. This is idempotent and repairs any
+# earlier damage (an old build stripped the -updates/-security pockets, and the
+# rootfs persists across app updates, so the damage stuck — breaking version
+# resolution because the image already has -updates packages installed).
+case "$(dpkg --print-architecture)" in
+    arm64|armhf) MIRROR="http://ports.ubuntu.com/ubuntu-ports" ;;
+    *)           MIRROR="http://archive.ubuntu.com/ubuntu" ;;
+esac
+cat > /etc/apt/sources.list <<EOF
+deb $MIRROR jammy main restricted universe multiverse
+deb $MIRROR jammy-updates main restricted universe multiverse
+deb $MIRROR jammy-security main restricted universe multiverse
+deb $MIRROR jammy-backports main restricted universe multiverse
+EOF
+
+# The cloud image's pre-seeded apt lists are weeks old; the CDN edge caches a
+# stale InRelease against newer indexes ("File has unexpected size"). Drop the
+# lists and force origin revalidation FOR THE INDEX UPDATE ONLY (No-Cache). We
+# remove that override before installing so the package .debs (immutable,
+# content-addressed) still download fast via the CDN cache.
 rm -rf /var/lib/apt/lists/*
 mkdir -p /etc/apt/apt.conf.d
-printf 'Acquire::Retries "5";\nAcquire::http::No-Cache "true";\nAcquire::https::No-Cache "true";\n' \
-    > /etc/apt/apt.conf.d/80-wt
+echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries
+echo 'Acquire::http::No-Cache "true";' > /etc/apt/apt.conf.d/81-nocache
 
 echo "[install] Updating package lists..."
 apt-get update -y || apt-get update -y || apt-get update -y || \
     echo "[install] apt update had partial errors — continuing with available indexes."
+
+rm -f /etc/apt/apt.conf.d/81-nocache   # package downloads may use the fast CDN cache
 
 echo "[install] Installing base utilities..."
 apt-get install -y --no-install-recommends \

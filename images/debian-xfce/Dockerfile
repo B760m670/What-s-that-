@@ -16,8 +16,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && locale-gen \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# proot-friendly defaults baked in (so first launch needs no setup).
-RUN rm -f /etc/resolv.conf \
-    && printf 'nameserver 8.8.8.8\nnameserver 1.1.1.1\n' > /etc/resolv.conf \
-    && printf '127.0.0.1 localhost\n' > /etc/hosts \
-    && touch /root/.wt-desktop-ready
+# Mark the desktop as ready. DNS/hosts are written by the app at install time;
+# /etc/resolv.conf is a Docker-managed bind-mount during build, so don't touch it.
+RUN touch /root/.wt-desktop-ready

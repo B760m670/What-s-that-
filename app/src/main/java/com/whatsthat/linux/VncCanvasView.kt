@@ -81,6 +81,27 @@ class VncCanvasView(context: Context) : View(context) {
         return true
     }
 
+    /**
+     * A USB/Bluetooth mouse moves the pointer via hover events (no button down)
+     * and scrolls via the scroll axis — neither of which arrive in onTouchEvent.
+     */
+    override fun onGenericMotionEvent(event: MotionEvent): Boolean {
+        val bmp = frame ?: return false
+        val fx = ((event.x - dx) / scale).toInt().coerceIn(0, bmp.width - 1)
+        val fy = ((event.y - dy) / scale).toInt().coerceIn(0, bmp.height - 1)
+        when (event.actionMasked) {
+            MotionEvent.ACTION_HOVER_MOVE -> client?.sendPointer(0, fx, fy)
+            MotionEvent.ACTION_SCROLL -> {
+                val v = event.getAxisValue(MotionEvent.AXIS_VSCROLL)
+                val wheel = if (v > 0) 1 shl 3 else 1 shl 4   // RFB button 4 up / 5 down
+                client?.sendPointer(wheel, fx, fy)
+                client?.sendPointer(0, fx, fy)
+            }
+            else -> return false
+        }
+        return true
+    }
+
     /** Show the soft keyboard targeted at this view. */
     override fun onCheckIsTextEditor(): Boolean = true
 

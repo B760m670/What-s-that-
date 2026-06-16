@@ -28,7 +28,11 @@ class VncClient(
     private var socket: Socket? = null
     private lateinit var input: DataInputStream
     private lateinit var output: DataOutputStream
-    private val writeLock = Any()
+
+    // All post-handshake writes go through one writer thread, so callers (incl.
+    // the UI thread handling touches) never touch the socket directly — that
+    // would throw NetworkOnMainThreadException.
+    private val writeQueue = java.util.concurrent.LinkedBlockingQueue<ByteArray>()
 
     private var width = 0
     private var height = 0
@@ -66,6 +70,7 @@ class VncClient(
             output = DataOutputStream(s.getOutputStream())
 
             handshake()
+            startWriter()
             requestUpdate(incremental = false)
             startRefreshNudge()
             messageLoop()
@@ -83,6 +88,22 @@ class VncClient(
      * outstanding, but if that ever gets consumed with no follow-up, this keeps
      * the desktop (incl. cursor moves from our pointer events) flowing.
      */
+    /** The single thread that actually writes queued messages to the socket. */
+    private fun startWriter() {
+        Thread {
+            try {
+                while (running) {
+                    val msg = writeQueue.take()
+                    output.write(msg)
+                    output.flush()
+                }
+            } catch (_: InterruptedException) {
+            } catch (e: Exception) {
+                lastError = "writer:${e.javaClass.simpleName}:${e.message}"
+            }
+        }.apply { isDaemon = true; name = "vnc-writer"; start() }
+    }
+
     private fun startRefreshNudge() {
         Thread {
             while (running) {
@@ -97,18 +118,18 @@ class VncClient(
     private fun handshake() {
         val serverVersion = ByteArray(12)
         input.readFully(serverVersion)
-        write { output.write("RFB 003.008\n".toByteArray(Charsets.US_ASCII)) }
+        directWrite { output.write("RFB 003.008\n".toByteArray(Charsets.US_ASCII)) }
 
         val numTypes = input.readUnsignedByte()
         if (numTypes == 0) throw RuntimeException("Server refused: ${readString()}")
         val types = ByteArray(numTypes).also { input.readFully(it) }
         if (types.none { it.toInt() == SEC_NONE }) throw RuntimeException("Server requires authentication")
-        write { output.writeByte(SEC_NONE) }
+        directWrite { output.writeByte(SEC_NONE) }
 
         val securityResult = input.readInt()
         if (securityResult != 0) throw RuntimeException("Handshake failed: ${readString()}")
 
-        write { output.writeByte(1) }            // ClientInit: shared = true
+        directWrite { output.writeByte(1) }      // ClientInit: shared = true
 
         width = input.readUnsignedShort()         // ServerInit
         height = input.readUnsignedShort()
@@ -123,7 +144,7 @@ class VncClient(
         onConnected(width, height, bmp)
     }
 
-    private fun setPixelFormat() = write {
+    private fun setPixelFormat() = directWrite {
         output.writeByte(0); output.writeByte(0); output.writeByte(0); output.writeByte(0) // type + pad
         output.writeByte(32)   // bits-per-pixel
         output.writeByte(24)   // depth
@@ -134,7 +155,7 @@ class VncClient(
         output.writeByte(0); output.writeByte(0); output.writeByte(0)          // padding
     }
 
-    private fun setEncodings() = write {
+    private fun setEncodings() = directWrite {
         output.writeByte(2); output.writeByte(0)  // type + pad
         output.writeShort(3)
         output.writeInt(ENC_RAW)
@@ -142,11 +163,13 @@ class VncClient(
         output.writeInt(ENC_DESKTOP_SIZE)
     }
 
-    private fun requestUpdate(incremental: Boolean) = write {
-        output.writeByte(3)
-        output.writeByte(if (incremental) 1 else 0)
-        output.writeShort(0); output.writeShort(0)
-        output.writeShort(width); output.writeShort(height)
+    /** Enqueued (off the caller's thread) so it's safe to call from anywhere. */
+    private fun requestUpdate(incremental: Boolean) {
+        val w = width; val h = height
+        writeQueue.offer(byteArrayOf(
+            3, (if (incremental) 1 else 0).toByte(), 0, 0, 0, 0,
+            (w ushr 8).toByte(), w.toByte(), (h ushr 8).toByte(), h.toByte(),
+        ))
     }
 
     // --- server message loop -------------------------------------------------
@@ -225,42 +248,32 @@ class VncClient(
 
     // --- client input --------------------------------------------------------
 
-    /** buttonMask bit0 = left, bit1 = middle, bit2 = right. */
+    /** buttonMask bit0 = left, bit1 = middle, bit2 = right. Safe from any thread. */
     fun sendPointer(buttonMask: Int, x: Int, y: Int) {
         if (!running) return
-        try {
-            write {
-                output.writeByte(5)
-                output.writeByte(buttonMask)
-                output.writeShort(x.coerceIn(0, width - 1))
-                output.writeShort(y.coerceIn(0, height - 1))
-            }
-            pointerSent++   // count only bytes actually flushed to the socket
-        } catch (e: Exception) {
-            lastError = "ptr-write: ${e.message}"
-        }
+        val cx = x.coerceIn(0, (width - 1).coerceAtLeast(0))
+        val cy = y.coerceIn(0, (height - 1).coerceAtLeast(0))
+        writeQueue.offer(byteArrayOf(
+            5, buttonMask.toByte(),
+            (cx ushr 8).toByte(), cx.toByte(), (cy ushr 8).toByte(), cy.toByte(),
+        ))
+        pointerSent++
     }
 
     fun sendKey(keysym: Int, down: Boolean) {
         if (!running) return
-        try {
-            write {
-                output.writeByte(4)
-                output.writeByte(if (down) 1 else 0)
-                output.writeByte(0); output.writeByte(0)
-                output.writeInt(keysym)
-            }
-            keySent++
-        } catch (e: Exception) {
-            lastError = "key-write: ${e.message}"
-        }
+        writeQueue.offer(byteArrayOf(
+            4, (if (down) 1 else 0).toByte(), 0, 0,
+            (keysym ushr 24).toByte(), (keysym ushr 16).toByte(),
+            (keysym ushr 8).toByte(), keysym.toByte(),
+        ))
+        keySent++
     }
 
-    private inline fun write(block: () -> Unit) {
-        synchronized(writeLock) {
-            block()
-            output.flush()
-        }
+    /** Direct write — only used during the handshake, on the network thread. */
+    private inline fun directWrite(block: () -> Unit) {
+        block()
+        output.flush()
     }
 
     private fun readString(): String {

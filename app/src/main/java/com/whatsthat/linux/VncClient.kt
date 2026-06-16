@@ -62,8 +62,7 @@ class VncClient(
 
     private fun run() {
         try {
-            val s = Socket()
-            s.connect(InetSocketAddress(host, port), 8000)
+            val s = connectWithRetry()
             s.tcpNoDelay = true
             socket = s
             input = DataInputStream(BufferedInputStream(s.getInputStream()))
@@ -80,6 +79,21 @@ class VncClient(
             running = false
             runCatching { socket?.close() }
         }
+    }
+
+    /** The server may start listening a moment after VNC_READY — retry briefly. */
+    private fun connectWithRetry(): Socket {
+        var last: Exception? = null
+        repeat(12) {
+            if (!running) throw last ?: RuntimeException("cancelled")
+            try {
+                return Socket().apply { connect(InetSocketAddress(host, port), 3000) }
+            } catch (e: Exception) {
+                last = e
+                try { Thread.sleep(1000) } catch (_: InterruptedException) {}
+            }
+        }
+        throw last ?: RuntimeException("could not connect to $host:$port")
     }
 
     /**

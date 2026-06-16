@@ -69,7 +69,8 @@ else
 geometry=$GEOMETRY
 depth=$DEPTH
 SecurityTypes=None
-localhost
+rfbport=$PORT
+interface=127.0.0.1
 EOF
     vncserver ":$DISPLAY_NUM"
 fi

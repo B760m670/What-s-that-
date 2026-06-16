@@ -49,6 +49,7 @@ if [ "$DISTRO_ID" = "alpine" ]; then
         ttf-dejavu \
         bash sudo nano shadow setpriv \
         || echo "[install] some Alpine packages failed — desktop may still work."
+    touch /root/.wt-desktop-ready
     echo "[install] Desktop installed (alpine)."
     exit 0
 fi
@@ -137,4 +138,5 @@ dbus-launch --exit-with-session $SESSION_CMD
 EOF
 chmod +x /root/.vnc/xstartup
 
+touch /root/.wt-desktop-ready
 echo "[install] Desktop installed (profile: $PROFILE)."

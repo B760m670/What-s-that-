@@ -30,7 +30,9 @@ class LinuxEnvironment(context: Context) {
         set(v) { prefs.edit().putString("active_distro", v.id).apply() }
 
     fun rootfsReady(d: Distro) = File(distroDir(d), ".bootstrap-done").exists()
-    fun desktopReady(d: Distro) = File(distroDir(d), "usr/bin/startxfce4").exists()
+    // The desktop/wine installer writes this marker when it finishes (works for
+    // XFCE, Openbox, or the Wine environment alike).
+    fun desktopReady(d: Distro) = File(distroDir(d), "root/.wt-desktop-ready").exists()
     fun removeDistro(d: Distro) { distroDir(d).deleteRecursively() }
 
     /** Bytes occupied on disk by an installed distro (walks its rootfs). */
@@ -111,9 +113,10 @@ class LinuxEnvironment(context: Context) {
     fun bootstrapDistro(d: Distro, onLog: (String) -> Unit): Int =
         RootfsInstaller(home = home, rootfs = distroDir(d), arch = arch, distro = d, onLog = onLog).install()
 
-    /** Install the desktop inside the active distro's container. */
+    /** Install the desktop (or the Wine environment) inside the active container. */
     fun installDesktop(onLog: (String) -> Unit): Int {
-        val cmd = containerCommand("install-desktop.sh", shellFor(activeDistro))
+        val script = if (activeDistro.wine) "install-wine.sh" else "install-desktop.sh"
+        val cmd = containerCommand(script, shellFor(activeDistro))
         return exec(cmd, mapOf(
             "WT_PROFILE" to BuildConfig.DESKTOP_PROFILE,
             "WT_PKG" to activeDistro.pkg.name.lowercase(),

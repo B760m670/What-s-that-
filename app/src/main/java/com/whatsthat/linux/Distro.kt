@@ -18,6 +18,8 @@ class Distro(
     /** Optional SHA256SUMS URL for integrity verification. */
     val checksumUrl: ((arch: String) -> String)? = null,
     val experimental: Boolean = false,
+    /** A Windows-apps (Box64 + Wine) environment built on this Linux base. */
+    val wine: Boolean = false,
 )
 
 object Distros {
@@ -80,6 +82,10 @@ object Distros {
         Distro(
             id = "alpine", name = "Alpine (lightest)", pkg = PkgManager.APK, approxDownloadMb = 4,
             resolveUrl = alpineMinirootfs(), experimental = true,
+        ),
+        Distro(
+            id = "windows", name = "Windows apps (Wine)", pkg = PkgManager.APT, approxDownloadMb = 120,
+            resolveUrl = lxc("debian", "bookworm"), experimental = true, wine = true,
         ),
     )
 

@@ -11,14 +11,22 @@
 set -eu
 export DEBIAN_FRONTEND=noninteractive
 PROFILE="${WT_PROFILE:-full}"
-DISTRO="${WT_DISTRO:-ubuntu}"
 
-echo "[install] Profile: $PROFILE  Distro: $DISTRO"
+# Trust the rootfs itself, not what the app thinks is active — that's the single
+# source of truth and avoids writing the wrong distro's repos.
+DISTRO_ID="unknown"
+PRETTY="unknown"
+if [ -r /etc/os-release ]; then
+    . /etc/os-release
+    DISTRO_ID="${ID:-unknown}"
+    PRETTY="${PRETTY_NAME:-$DISTRO_ID}"
+fi
+echo "[install] Profile: $PROFILE  Rootfs: $PRETTY  (app said: ${WT_DISTRO:-?})"
 
-# Ubuntu's cloud image ships a stale/edited sources.list — rewrite a complete,
-# correct one (idempotent). Other distros (e.g. Debian from the image server)
-# already have a working sources.list, so leave theirs untouched.
-if [ "$DISTRO" = "ubuntu" ]; then
+# Only Ubuntu's cloud image ships a stale/edited sources.list that needs a full
+# rewrite. Debian (and other images) already have a correct, signed sources.list
+# with the matching keyring, so leave theirs untouched.
+if [ "$DISTRO_ID" = "ubuntu" ]; then
     case "$(dpkg --print-architecture)" in
         arm64|armhf) MIRROR="http://ports.ubuntu.com/ubuntu-ports" ;;
         *)           MIRROR="http://archive.ubuntu.com/ubuntu" ;;

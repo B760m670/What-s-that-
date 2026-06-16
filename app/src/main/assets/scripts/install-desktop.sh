@@ -11,23 +11,25 @@
 set -eu
 export DEBIAN_FRONTEND=noninteractive
 PROFILE="${WT_PROFILE:-full}"
+DISTRO="${WT_DISTRO:-ubuntu}"
 
-echo "[install] Profile: $PROFILE"
+echo "[install] Profile: $PROFILE  Distro: $DISTRO"
 
-# Rewrite a complete, correct sources.list. This is idempotent and repairs any
-# earlier damage (an old build stripped the -updates/-security pockets, and the
-# rootfs persists across app updates, so the damage stuck — breaking version
-# resolution because the image already has -updates packages installed).
-case "$(dpkg --print-architecture)" in
-    arm64|armhf) MIRROR="http://ports.ubuntu.com/ubuntu-ports" ;;
-    *)           MIRROR="http://archive.ubuntu.com/ubuntu" ;;
-esac
-cat > /etc/apt/sources.list <<EOF
+# Ubuntu's cloud image ships a stale/edited sources.list — rewrite a complete,
+# correct one (idempotent). Other distros (e.g. Debian from the image server)
+# already have a working sources.list, so leave theirs untouched.
+if [ "$DISTRO" = "ubuntu" ]; then
+    case "$(dpkg --print-architecture)" in
+        arm64|armhf) MIRROR="http://ports.ubuntu.com/ubuntu-ports" ;;
+        *)           MIRROR="http://archive.ubuntu.com/ubuntu" ;;
+    esac
+    cat > /etc/apt/sources.list <<EOF
 deb $MIRROR jammy main restricted universe multiverse
 deb $MIRROR jammy-updates main restricted universe multiverse
 deb $MIRROR jammy-security main restricted universe multiverse
 deb $MIRROR jammy-backports main restricted universe multiverse
 EOF
+fi
 
 # The cloud image's pre-seeded apt lists are weeks old; the CDN edge caches a
 # stale InRelease against newer indexes ("File has unexpected size"). Drop the

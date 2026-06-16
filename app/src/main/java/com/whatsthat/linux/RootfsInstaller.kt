@@ -23,42 +23,32 @@ class RootfsInstaller(
     private val home: File,
     private val rootfs: File,
     private val arch: String,
-    private val variant: String,            // "standard" | "minimal"
+    private val distro: Distro,
     private val onLog: (String) -> Unit,
 ) {
-    private val imgArch = when (arch) {
-        "aarch64" -> "arm64"
-        "arm" -> "armhf"
-        "x86_64" -> "amd64"
-        else -> error("Unsupported arch: $arch")
-    }
-
-    /** Returns 0 on success, non-zero on failure (mirrors the old script). */
+    /** Returns 0 on success, non-zero on failure. */
     fun install(): Int {
         if (File(rootfs, ".bootstrap-done").exists()) {
-            onLog("[bootstrap] Ubuntu rootfs already installed.")
+            onLog("[bootstrap] ${distro.name} already installed.")
             return 0
         }
         return try {
             rootfs.mkdirs()
             val tmp = File(home, "tmp").apply { mkdirs() }
-            val tarball = File(tmp, "ubuntu-rootfs.tar.xz")
+            val tarball = File(tmp, "${distro.id}-rootfs.tar.xz")
 
-            val baseDir = if (variant == "minimal")
-                "minimal/releases/jammy/release" else "releases/22.04/release"
-            val fname = if (variant == "minimal")
-                "ubuntu-22.04-minimal-cloudimg-$imgArch-root.tar.xz"
-            else "ubuntu-22.04-server-cloudimg-$imgArch-root.tar.xz"
-            val base = "https://cloud-images.ubuntu.com/$baseDir"
+            onLog("[bootstrap] Resolving ${distro.name} image…")
+            val url = distro.resolveUrl(arch) { httpText(it) }
+            val fname = url.substringAfterLast('/')
+            onLog("[bootstrap] Downloading $fname …")
+            download(url, tarball)
 
-            onLog("[bootstrap] Downloading $fname ...")
-            download("$base/$fname", tarball)
-
-            val expected = runCatching { fetchSha256("$base/SHA256SUMS", fname) }.getOrNull()
+            val expected = distro.checksumUrl?.let { sumsUrl ->
+                runCatching { fetchSha256(sumsUrl(arch), fname) }.getOrNull()
+            }
             if (expected != null) {
-                onLog("[bootstrap] Verifying integrity ...")
-                val actual = sha256(tarball)
-                if (!actual.equals(expected, ignoreCase = true)) {
+                onLog("[bootstrap] Verifying integrity …")
+                if (!sha256(tarball).equals(expected, ignoreCase = true)) {
                     onLog("[bootstrap] CHECKSUM MISMATCH — refusing to install.")
                     tarball.delete()
                     return 1
@@ -68,17 +58,17 @@ class RootfsInstaller(
                 onLog("[bootstrap] WARNING: checksum unavailable — proceeding unverified.")
             }
 
-            onLog("[bootstrap] Extracting rootfs (this runs once) ...")
+            onLog("[bootstrap] Extracting rootfs (this runs once) …")
             extractTarXz(tarball)
 
-            // Cloud images ship resolv.conf as a dangling symlink; write real files.
+            // Some images ship resolv.conf as a dangling symlink; write real files.
             File(rootfs, "etc").mkdirs()
             File(rootfs, "etc/resolv.conf").apply { delete(); writeText("nameserver 8.8.8.8\nnameserver 1.1.1.1\n") }
             File(rootfs, "etc/hosts").apply { delete(); writeText("127.0.0.1 localhost\n") }
 
             tarball.delete()
             File(rootfs, ".bootstrap-done").createNewFile()
-            onLog("[bootstrap] Ubuntu rootfs ready.")
+            onLog("[bootstrap] ${distro.name} ready.")
             0
         } catch (e: Exception) {
             onLog("[bootstrap] failed: ${e.message}")
@@ -87,6 +77,10 @@ class RootfsInstaller(
     }
 
     // --- networking ----------------------------------------------------------
+
+    /** Fetch a URL's body as text (used to resolve image-server directory indexes). */
+    private fun httpText(spec: String): String =
+        openFollowingRedirects(spec).inputStream.bufferedReader().use { it.readText() }
 
     private fun openFollowingRedirects(spec: String): HttpURLConnection {
         var url = URL(spec)

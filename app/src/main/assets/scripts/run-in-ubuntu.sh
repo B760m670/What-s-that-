@@ -9,7 +9,8 @@
 set -eu
 
 : "${WT_HOME:?}" "${PROOT:?}"
-ROOTFS="$WT_HOME/ubuntu"
+# Active distro's rootfs (set by the app); fall back to the legacy ubuntu path.
+ROOTFS="${WT_ROOTFS:-$WT_HOME/ubuntu}"
 
 if [ ! -f "$ROOTFS/.bootstrap-done" ]; then
     echo "Ubuntu is not installed yet. Run bootstrap first." >&2

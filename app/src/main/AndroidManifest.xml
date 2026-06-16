@@ -29,6 +29,12 @@
             </intent-filter>
         </activity>
 
+        <!-- Distribution picker / manager. -->
+        <activity
+            android:name=".DistrosActivity"
+            android:exported="false"
+            android:theme="@style/Theme.WhatsThatLinux" />
+
         <!-- Embedded VNC desktop viewer (our own RFB client). -->
         <activity
             android:name=".VncActivity"

@@ -1,10 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">What\'s that? — Linux</string>
-    <string name="action_install_ubuntu">Install Ubuntu</string>
+    <string name="action_install_ubuntu">Install %1$s</string>
     <string name="action_install_desktop">Install XFCE desktop</string>
     <string name="action_launch_desktop">Launch desktop</string>
-    <string name="status_arch">Device arch: %1$s · build %2$s</string>
+    <string name="action_distributions">Distributions…</string>
+    <string name="distros_title">Distributions</string>
+    <string name="distro_active">active</string>
+    <string name="distro_installed">installed</string>
+    <string name="distro_not_installed">not installed</string>
+    <string name="distro_use">Use</string>
+    <string name="distro_remove">Remove</string>
+    <string name="status_arch">%1$s · %2$s · build %3$s</string>
     <string name="notif_running">Linux session is running</string>
     <string name="hint_no_vnc_viewer">Desktop is up at %1$s — install a VNC viewer to connect.</string>
     <string name="console_title">Logs &amp; command console</string>

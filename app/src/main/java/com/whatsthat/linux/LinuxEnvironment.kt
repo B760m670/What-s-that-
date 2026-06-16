@@ -15,7 +15,33 @@ class LinuxEnvironment(context: Context) {
     private val appContext = context.applicationContext
     val home: File = appContext.filesDir
     private val scriptsDir = File(home, "scripts")
-    private val rootfs = File(home, "ubuntu")
+    private val distrosDir = File(home, "distros")
+    private val prefs = appContext.getSharedPreferences("wt", Context.MODE_PRIVATE)
+
+    init { migrateLegacyUbuntu() }
+
+    /** Per-distro rootfs directory. */
+    private fun distroDir(d: Distro) = File(distrosDir, d.id)
+    private val rootfs: File get() = distroDir(activeDistro)
+
+    val allDistros: List<Distro> get() = Distros.all
+    var activeDistro: Distro
+        get() = Distros.byId(prefs.getString("active_distro", "ubuntu") ?: "ubuntu")
+        set(v) { prefs.edit().putString("active_distro", v.id).apply() }
+
+    fun rootfsReady(d: Distro) = File(distroDir(d), ".bootstrap-done").exists()
+    fun desktopReady(d: Distro) = File(distroDir(d), "usr/bin/startxfce4").exists()
+    fun removeDistro(d: Distro) { distroDir(d).deleteRecursively() }
+
+    /** Move a v1 install (filesDir/ubuntu) into the per-distro layout, once. */
+    private fun migrateLegacyUbuntu() {
+        val legacy = File(home, "ubuntu")
+        val target = File(distrosDir, "ubuntu")
+        if (legacy.exists() && !target.exists()) {
+            distrosDir.mkdirs()
+            legacy.renameTo(target)
+        }
+    }
 
     /** Where Android extracted our native libs (proot, loader, libtalloc). */
     private val nativeLibDir = File(appContext.applicationInfo.nativeLibraryDir)
@@ -35,8 +61,9 @@ class LinuxEnvironment(context: Context) {
         else -> Build.SUPPORTED_ABIS.firstOrNull().orEmpty()
     }
 
-    val isBootstrapped: Boolean get() = File(rootfs, ".bootstrap-done").exists()
-    val isDesktopInstalled: Boolean get() = File(rootfs, "usr/bin/startxfce4").exists()
+    /** State of the currently active distro (drives the main button). */
+    val isBootstrapped: Boolean get() = rootfsReady(activeDistro)
+    val isDesktopInstalled: Boolean get() = desktopReady(activeDistro)
 
     /** Copy the bundled shell scripts out of the APK into a writable, exec dir. */
     fun prepareScripts() {
@@ -69,23 +96,23 @@ class LinuxEnvironment(context: Context) {
     }
 
     /**
-     * Download + verify + extract the Ubuntu rootfs. Done entirely in-process
-     * (the Android sandbox has no curl/tar/xz), see [RootfsInstaller].
+     * Download + verify + extract the active distro's rootfs, in-process (the
+     * Android sandbox has no curl/tar/xz), see [RootfsInstaller].
      */
-    fun bootstrap(onLog: (String) -> Unit): Int =
-        RootfsInstaller(
-            home = home,
-            rootfs = rootfs,
-            arch = arch,
-            variant = BuildConfig.UBUNTU_VARIANT,
-            onLog = onLog,
-        ).install()
+    fun bootstrap(onLog: (String) -> Unit): Int = bootstrapDistro(activeDistro, onLog)
 
-    /** Install the desktop inside the container, per the build's profile. */
+    fun bootstrapDistro(d: Distro, onLog: (String) -> Unit): Int =
+        RootfsInstaller(home = home, rootfs = distroDir(d), arch = arch, distro = d, onLog = onLog).install()
+
+    /** Install the desktop inside the active distro's container. */
     fun installDesktop(onLog: (String) -> Unit): Int =
         execScript(
             "install-desktop.sh", insideContainer = true,
-            extraEnv = mapOf("WT_PROFILE" to BuildConfig.DESKTOP_PROFILE),
+            extraEnv = mapOf(
+                "WT_PROFILE" to BuildConfig.DESKTOP_PROFILE,
+                "WT_PKG" to activeDistro.pkg.name.lowercase(),
+                "WT_DISTRO" to activeDistro.id,
+            ),
             onLog = onLog,
         )
 
@@ -165,6 +192,7 @@ class LinuxEnvironment(context: Context) {
         pb.environment().apply {
             put("WT_HOME", home.absolutePath)
             put("WT_ARCH", arch)
+            put("WT_ROOTFS", rootfs.absolutePath)
             put("PROOT", prootBinary.absolutePath)
             put("PROOT_TMP_DIR", File(home, "tmp").absolutePath)
             put("WT_NATIVE_LIB", nativeLibDir.absolutePath)

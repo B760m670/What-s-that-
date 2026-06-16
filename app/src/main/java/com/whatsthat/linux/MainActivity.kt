@@ -30,10 +30,16 @@ class MainActivity : AppCompatActivity() {
 
         refreshState()
         binding.actionButton.setOnClickListener { onAction() }
+        binding.distrosButton.setOnClickListener { startActivity(Intent(this, DistrosActivity::class.java)) }
         binding.runButton.setOnClickListener { runConsoleCommand() }
         binding.cmdInput.setOnEditorActionListener { _, _, _ -> runConsoleCommand(); true }
 
         checkForUpdates()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshState()   // the active distro may have changed in DistrosActivity
     }
 
     /** On launch, see if CI published a newer APK; if so, fetch + offer to install. */
@@ -66,11 +72,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshState() {
         binding.actionButton.text = when {
-            !env.isBootstrapped -> getString(R.string.action_install_ubuntu)
+            !env.isBootstrapped -> getString(R.string.action_install_ubuntu, env.activeDistro.name)
             !env.isDesktopInstalled -> getString(R.string.action_install_desktop)
             else -> getString(R.string.action_launch_desktop)
         }
-        binding.statusText.text = getString(R.string.status_arch, env.arch, BuildConfig.GIT_SHA.take(7))
+        binding.statusText.text =
+            getString(R.string.status_arch, env.activeDistro.name, env.arch, BuildConfig.GIT_SHA.take(7))
     }
 
     private fun onAction() {

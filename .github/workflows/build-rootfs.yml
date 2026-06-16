@@ -1,0 +1,42 @@
+name: Build rootfs images
+
+# Builds our OWN pre-configured rootfs images (arm64) via Docker + QEMU and
+# publishes them to the 'images' release, so the app downloads a ready,
+# tested image instead of an upstream one (no on-device apt, no flaky mirrors).
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'build/**'
+      - '.github/workflows/build-rootfs.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  debian-xfce:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build arm64 Debian+XFCE rootfs
+        run: |
+          docker buildx build --platform linux/arm64 \
+            -t wt-debian-xfce --load build/debian-xfce
+          docker create --platform linux/arm64 --name wt wt-debian-xfce
+          # docker export gives us the container's filesystem = our rootfs.
+          docker export wt | xz -T0 -6 > whatsthat-debian-xfce-arm64.tar.xz
+          ls -la whatsthat-debian-xfce-arm64.tar.xz
+
+      - name: Publish image to the 'images' release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: images
+          name: Rootfs images
+          prerelease: true
+          files: whatsthat-debian-xfce-arm64.tar.xz
+          body: |
+            Pre-built, pre-configured rootfs images for What's that? — Linux.
+            Built in CI from build/*, ready to download and run (no on-device setup).

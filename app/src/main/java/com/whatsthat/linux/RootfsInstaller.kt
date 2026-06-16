@@ -41,7 +41,17 @@ class RootfsInstaller(
             val url = distro.resolveUrl(arch) { httpText(it) }
             val fname = url.substringAfterLast('/')
             onLog("[bootstrap] Downloading $fname …")
-            download(url, tarball)
+            var dlErr: Exception? = null
+            var ok = false
+            for (attempt in 1..3) {
+                try { download(url, tarball); ok = true; break }
+                catch (e: Exception) {
+                    dlErr = e
+                    onLog("[bootstrap] download attempt $attempt failed (${e.message}); retrying…")
+                    Thread.sleep(2000L * attempt)
+                }
+            }
+            if (!ok) throw dlErr ?: RuntimeException("download failed")
 
             val expected = distro.checksumUrl?.let { sumsUrl ->
                 runCatching { fetchSha256(sumsUrl(arch), fname) }.getOrNull()
@@ -87,8 +97,8 @@ class RootfsInstaller(
         repeat(6) {
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 instanceFollowRedirects = false
-                connectTimeout = 15000
-                readTimeout = 30000
+                connectTimeout = 30000
+                readTimeout = 60000
                 setRequestProperty("User-Agent", "WhatsThatLinux")
             }
             when (conn.responseCode) {

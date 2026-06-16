@@ -11,6 +11,8 @@ class Distro(
     val id: String,
     val name: String,
     val pkg: PkgManager,
+    /** Rough compressed rootfs download size, MB (shown before install). */
+    val approxDownloadMb: Int,
     /** Resolve the rootfs tarball URL. [http] fetches a URL's text (for index lookups). */
     val resolveUrl: (arch: String, http: (String) -> String) -> String,
     /** Optional SHA256SUMS URL for integrity verification. */
@@ -44,7 +46,7 @@ object Distros {
 
     val all: List<Distro> = listOf(
         Distro(
-            id = "ubuntu", name = "Ubuntu 22.04", pkg = PkgManager.APT,
+            id = "ubuntu", name = "Ubuntu 22.04", pkg = PkgManager.APT, approxDownloadMb = 250,
             resolveUrl = { arch, _ ->
                 "https://cloud-images.ubuntu.com/releases/22.04/release/" +
                     "ubuntu-22.04-server-cloudimg-${debArch(arch)}-root.tar.xz"
@@ -52,11 +54,13 @@ object Distros {
             checksumUrl = { "https://cloud-images.ubuntu.com/releases/22.04/release/SHA256SUMS" },
         ),
         Distro(
-            id = "debian", name = "Debian 12 (Bookworm)", pkg = PkgManager.APT,
+            id = "debian", name = "Debian 12 (Bookworm)", pkg = PkgManager.APT, approxDownloadMb = 120,
             resolveUrl = lxc("debian", "bookworm"),
         ),
-        // Alpine (apk/musl, no bash) is the next addition — it needs its own
-        // install path, so it's intentionally not offered yet.
+        Distro(
+            id = "alpine", name = "Alpine 3.19 (lightest)", pkg = PkgManager.APK, approxDownloadMb = 4,
+            resolveUrl = lxc("alpine", "3.19"), experimental = true,
+        ),
     )
 
     fun byId(id: String): Distro = all.firstOrNull { it.id == id } ?: all.first()

@@ -33,6 +33,13 @@ class LinuxEnvironment(context: Context) {
     fun desktopReady(d: Distro) = File(distroDir(d), "usr/bin/startxfce4").exists()
     fun removeDistro(d: Distro) { distroDir(d).deleteRecursively() }
 
+    /** Bytes occupied on disk by an installed distro (walks its rootfs). */
+    fun installedSizeBytes(d: Distro): Long =
+        distroDir(d).walkTopDown().filter { it.isFile }.sumOf { it.length() }
+
+    /** Guest shell for a distro: Alpine has no bash, so use sh. */
+    private fun shellFor(d: Distro) = if (d.pkg == PkgManager.APK) "/bin/sh" else "/bin/bash"
+
     /** Move a v1 install (filesDir/ubuntu) into the per-distro layout, once. */
     private fun migrateLegacyUbuntu() {
         val legacy = File(home, "ubuntu")
@@ -105,16 +112,14 @@ class LinuxEnvironment(context: Context) {
         RootfsInstaller(home = home, rootfs = distroDir(d), arch = arch, distro = d, onLog = onLog).install()
 
     /** Install the desktop inside the active distro's container. */
-    fun installDesktop(onLog: (String) -> Unit): Int =
-        execScript(
-            "install-desktop.sh", insideContainer = true,
-            extraEnv = mapOf(
-                "WT_PROFILE" to BuildConfig.DESKTOP_PROFILE,
-                "WT_PKG" to activeDistro.pkg.name.lowercase(),
-                "WT_DISTRO" to activeDistro.id,
-            ),
-            onLog = onLog,
-        )
+    fun installDesktop(onLog: (String) -> Unit): Int {
+        val cmd = containerCommand("install-desktop.sh", shellFor(activeDistro))
+        return exec(cmd, mapOf(
+            "WT_PROFILE" to BuildConfig.DESKTOP_PROFILE,
+            "WT_PKG" to activeDistro.pkg.name.lowercase(),
+            "WT_DISTRO" to activeDistro.id,
+        ), onLog)
+    }
 
     /**
      * Start the XFCE/VNC session and return the loopback "host:port" to connect
@@ -125,7 +130,7 @@ class LinuxEnvironment(context: Context) {
      */
     fun startDesktop(geometry: String, onLog: (String) -> Unit): String? {
         stopDesktop()
-        val pb = ProcessBuilder(containerCommand("start-desktop.sh")).redirectErrorStream(true)
+        val pb = ProcessBuilder(containerCommand("start-desktop.sh", shellFor(activeDistro))).redirectErrorStream(true)
         configureEnv(pb, mapOf("WT_GEOMETRY" to geometry))
         val process = pb.start()
         desktopProcess = process
@@ -169,7 +174,7 @@ class LinuxEnvironment(context: Context) {
         }
         val cmd = listOf(
             "/system/bin/sh", File(scriptsDir, "run-in-ubuntu.sh").absolutePath,
-            "/bin/bash", "-lc", command,
+            shellFor(activeDistro), "-c", command,
         )
         return exec(cmd, emptyMap(), onLog)
     }
@@ -179,12 +184,12 @@ class LinuxEnvironment(context: Context) {
     /** The running desktop/VNC session process (long-lived), if started. */
     private var desktopProcess: Process? = null
 
-    /** Build the command that pipes a bundled script through proot into bash. */
-    private fun containerCommand(scriptName: String): List<String> {
+    /** Pipe a bundled script through proot into the guest [shell]. */
+    private fun containerCommand(scriptName: String, shell: String = "/bin/bash"): List<String> {
         val script = File(scriptsDir, scriptName)
         return listOf(
-            "/system/bin/sh", File(scriptsDir, "run-in-ubuntu.sh").absolutePath, "/bin/bash", "-c",
-            "cat << 'WT_EOF' | bash\n${script.readText()}\nWT_EOF",
+            "/system/bin/sh", File(scriptsDir, "run-in-ubuntu.sh").absolutePath, shell, "-c",
+            "cat << 'WT_EOF' | $shell\n${script.readText()}\nWT_EOF",
         )
     }
 
@@ -201,20 +206,6 @@ class LinuxEnvironment(context: Context) {
             put("PATH", "${scriptsDir.absolutePath}:/system/bin:/system/xbin")
             putAll(extraEnv)
         }
-    }
-
-    private fun execScript(
-        name: String,
-        insideContainer: Boolean,
-        extraEnv: Map<String, String> = emptyMap(),
-        onLog: (String) -> Unit,
-    ): Int {
-        val command: List<String> = if (insideContainer) {
-            containerCommand(name)
-        } else {
-            listOf("/system/bin/sh", File(scriptsDir, name).absolutePath)
-        }
-        return exec(command, extraEnv, onLog)
     }
 
     private fun exec(command: List<String>, extraEnv: Map<String, String>, onLog: (String) -> Unit): Int {

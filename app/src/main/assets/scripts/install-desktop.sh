@@ -23,6 +23,27 @@ if [ -r /etc/os-release ]; then
 fi
 echo "[install] Profile: $PROFILE  Rootfs: $PRETTY  (app said: ${WT_DISTRO:-?})"
 
+# ---- Alpine (apk / musl, lightest) --------------------------------------
+if [ "$DISTRO_ID" = "alpine" ]; then
+    echo "[install] Alpine detected — installing XFCE via apk…"
+    # XFCE lives in the 'community' repo; make sure it's enabled.
+    if [ -f /etc/apk/repositories ]; then
+        sed -i 's|^#\(.*/community\)$|\1|' /etc/apk/repositories || true
+        grep -q '/community' /etc/apk/repositories 2>/dev/null || \
+            echo "https://dl-cdn.alpinelinux.org/alpine/v3.19/community" >> /etc/apk/repositories
+    fi
+    apk update || apk update || echo "[install] apk update had errors — continuing."
+    apk add --no-cache \
+        dbus dbus-x11 tigervnc \
+        xfce4 xfce4-terminal \
+        ttf-dejavu \
+        bash sudo nano shadow setpriv \
+        || echo "[install] some Alpine packages failed — desktop may still work."
+    echo "[install] Desktop installed (alpine)."
+    exit 0
+fi
+
+# ---- Ubuntu / Debian (apt) ----------------------------------------------
 # Only Ubuntu's cloud image ships a stale/edited sources.list that needs a full
 # rewrite. Debian (and other images) already have a correct, signed sources.list
 # with the matching keyring, so leave theirs untouched.

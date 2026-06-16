@@ -4,22 +4,28 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 
 /**
  * Full-screen host for the embedded VNC desktop. Connects to the loopback
  * display started by start-desktop.sh and renders it via [VncCanvasView].
- * A floating button toggles the soft keyboard for typing into the desktop.
+ * A floating button toggles the soft keyboard for typing into the desktop, and
+ * a thin status line shows live connection/input diagnostics.
  */
 class VncActivity : AppCompatActivity() {
 
     private var client: VncClient? = null
     private lateinit var canvas: VncCanvasView
+    private lateinit var status: TextView
+    private val ui = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -27,9 +33,17 @@ class VncActivity : AppCompatActivity() {
         val port = intent.getIntExtra(EXTRA_PORT, 5901)
 
         canvas = VncCanvasView(this)
+        status = TextView(this).apply {
+            setBackgroundColor(0x99000000.toInt())
+            setTextColor(Color.WHITE)
+            textSize = 11f
+            setPadding(12, 6, 12, 6)
+            text = "connecting to $host:$port…"
+        }
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             addView(canvas, FrameLayout.LayoutParams(-1, -1))
+            addView(status, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
             addView(keyboardButton(), FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply {
                 val m = (16 * resources.displayMetrics.density).toInt()
                 setMargins(m, m, m, m)
@@ -44,12 +58,28 @@ class VncActivity : AppCompatActivity() {
             onFrame = { runOnUiThread { canvas.invalidate() } },
             onError = { msg -> runOnUiThread {
                 Toast.makeText(this, "VNC: $msg", Toast.LENGTH_LONG).show()
-                finish()
+                // don't auto-close: keep the status line visible for diagnosis
             } },
         ).also {
             canvas.client = it
             it.start()
         }
+        startStatusUpdates()
+    }
+
+    /** Refresh the diagnostic status line ~1×/sec. */
+    private fun startStatusUpdates() {
+        ui.post(object : Runnable {
+            override fun run() {
+                client?.let { c ->
+                    status.text = "conn:${if (c.isRunning) "Y" else "N"}  " +
+                        "fb:${c.fbWidth}x${c.fbHeight}  frames:${c.framesReceived}  " +
+                        "ptr:${c.pointerSent}  key:${c.keySent}" +
+                        (c.lastError?.let { "  err:$it" } ?: "")
+                }
+                ui.postDelayed(this, 1000)
+            }
+        })
     }
 
     private fun keyboardButton() = Button(this).apply {
@@ -63,6 +93,7 @@ class VncActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        ui.removeCallbacksAndMessages(null)
         client?.stop()
         super.onDestroy()
     }

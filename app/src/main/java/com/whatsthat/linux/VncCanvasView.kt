@@ -58,6 +58,11 @@ class VncCanvasView(context: Context) : View(context) {
 
     // --- touch → pointer -----------------------------------------------------
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        requestFocus()   // so a hardware/USB keyboard's key events reach onKeyDown
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val bmp = frame ?: return false
         val fx = ((event.x - dx) / scale).toInt().coerceIn(0, bmp.width - 1)
@@ -65,6 +70,9 @@ class VncCanvasView(context: Context) : View(context) {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 requestFocus()
+                // Move the pointer to the spot first (buttons up), then press —
+                // some servers ignore a press that arrives without a prior move.
+                client?.sendPointer(0, fx, fy)
                 client?.sendPointer(1, fx, fy)
             }
             MotionEvent.ACTION_MOVE -> client?.sendPointer(1, fx, fy)

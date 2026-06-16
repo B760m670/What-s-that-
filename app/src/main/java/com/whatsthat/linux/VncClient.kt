@@ -36,6 +36,15 @@ class VncClient(
         private set
     private var thread: Thread? = null
 
+    // Lightweight diagnostics surfaced in the viewer's status overlay.
+    val isRunning: Boolean get() = running
+    @Volatile var framesReceived = 0; private set
+    @Volatile var pointerSent = 0; private set
+    @Volatile var keySent = 0; private set
+    @Volatile var lastError: String? = null; private set
+    val fbWidth: Int get() = width
+    val fbHeight: Int get() = height
+
     fun start() {
         if (running) return
         running = true
@@ -60,7 +69,7 @@ class VncClient(
             requestUpdate(incremental = false)
             messageLoop()
         } catch (e: Exception) {
-            if (running) onError(e.message ?: "VNC connection error")
+            if (running) { lastError = e.message; onError(e.message ?: "VNC connection error") }
         } finally {
             running = false
             runCatching { socket?.close() }
@@ -153,6 +162,7 @@ class VncClient(
                 else -> throw RuntimeException("Unsupported encoding $enc")
             }
         }
+        framesReceived++
         onFrame()
         requestUpdate(incremental = true)
     }
@@ -202,6 +212,7 @@ class VncClient(
     /** buttonMask bit0 = left, bit1 = middle, bit2 = right. */
     fun sendPointer(buttonMask: Int, x: Int, y: Int) {
         if (!running) return
+        pointerSent++
         runCatching {
             write {
                 output.writeByte(5)
@@ -214,6 +225,7 @@ class VncClient(
 
     fun sendKey(keysym: Int, down: Boolean) {
         if (!running) return
+        keySent++
         runCatching {
             write {
                 output.writeByte(4)

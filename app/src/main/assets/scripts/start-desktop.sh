@@ -26,6 +26,31 @@ rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}" 2>/dev/null 
 rm -f "/root/.vnc/"*":${DISPLAY_NUM}.pid" 2>/dev/null || true
 sleep 1
 
+# Clean stale session/auth state — a relaunch (esp. after switching distros)
+# inherits a broken ICE/X authority and fails xfce4-session.
+export HOME=/root
+export XDG_RUNTIME_DIR=/tmp/runtime-root
+mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
+rm -f /root/.ICEauthority /root/.Xauthority 2>/dev/null || true
+
+# Regenerate xstartup every launch (so fixes apply without reinstalling the
+# desktop). Pick whatever session is installed.
+if command -v startxfce4 >/dev/null 2>&1; then SESSION_CMD="startxfce4"
+elif command -v openbox-session >/dev/null 2>&1; then SESSION_CMD="openbox-session"
+elif command -v startlxqt >/dev/null 2>&1; then SESSION_CMD="startlxqt"
+else SESSION_CMD="xterm"; fi
+mkdir -p /root/.vnc
+cat > /root/.vnc/xstartup <<EOF
+#!/bin/sh
+unset SESSION_MANAGER
+unset DBUS_SESSION_BUS_ADDRESS
+export HOME=/root
+export XDG_RUNTIME_DIR=/tmp/runtime-root
+export XKL_XMODMAP_DISABLE=1
+exec dbus-launch --exit-with-session $SESSION_CMD
+EOF
+chmod +x /root/.vnc/xstartup
+
 echo "[desktop] Starting XFCE on :$DISPLAY_NUM (${GEOMETRY})..."
 # -localhost: only the on-device app can reach it. SecurityTypes None because
 # the socket never leaves localhost inside the app sandbox.

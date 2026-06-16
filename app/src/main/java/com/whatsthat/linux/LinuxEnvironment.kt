@@ -212,6 +212,10 @@ class LinuxEnvironment(context: Context) {
             put("PROOT_TMP_DIR", File(home, "tmp").absolutePath)
             put("WT_NATIVE_LIB", nativeLibDir.absolutePath)
             put("WT_LIBDIR", libDir.absolutePath)
+            // Alpine/musl + glib hit syscalls (faccessat2) that proot's seccomp
+            // fast-path lets through to the kernel, which rejects them. Make proot
+            // intercept everything for apk distros so those calls are emulated.
+            if (activeDistro.pkg == PkgManager.APK) put("PROOT_NO_SECCOMP", "1")
             put("HOME", home.absolutePath)
             put("PATH", "${scriptsDir.absolutePath}:/system/bin:/system/xbin")
             putAll(extraEnv)

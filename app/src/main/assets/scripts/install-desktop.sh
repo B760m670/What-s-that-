@@ -45,6 +45,7 @@ if [ "$DISTRO_ID" = "alpine" ]; then
     apk add --no-cache \
         dbus dbus-x11 tigervnc \
         xfce4 xfce4-terminal \
+        adwaita-icon-theme hicolor-icon-theme gdk-pixbuf librsvg \
         ttf-dejavu \
         bash sudo nano shadow setpriv \
         || echo "[install] some Alpine packages failed — desktop may still work."

@@ -67,6 +67,7 @@ class VncClient(
 
             handshake()
             requestUpdate(incremental = false)
+            startRefreshNudge()
             messageLoop()
         } catch (e: Exception) {
             if (running) { lastError = e.message; onError(e.message ?: "VNC connection error") }
@@ -74,6 +75,21 @@ class VncClient(
             running = false
             runCatching { socket?.close() }
         }
+    }
+
+    /**
+     * Insurance against a frozen display: periodically ask for an incremental
+     * update. Normally the request we send after each frame keeps exactly one
+     * outstanding, but if that ever gets consumed with no follow-up, this keeps
+     * the desktop (incl. cursor moves from our pointer events) flowing.
+     */
+    private fun startRefreshNudge() {
+        Thread {
+            while (running) {
+                try { Thread.sleep(500) } catch (_: InterruptedException) { break }
+                runCatching { requestUpdate(incremental = true) }
+            }
+        }.apply { isDaemon = true; name = "vnc-refresh"; start() }
     }
 
     // --- handshake -----------------------------------------------------------
@@ -212,27 +228,31 @@ class VncClient(
     /** buttonMask bit0 = left, bit1 = middle, bit2 = right. */
     fun sendPointer(buttonMask: Int, x: Int, y: Int) {
         if (!running) return
-        pointerSent++
-        runCatching {
+        try {
             write {
                 output.writeByte(5)
                 output.writeByte(buttonMask)
                 output.writeShort(x.coerceIn(0, width - 1))
                 output.writeShort(y.coerceIn(0, height - 1))
             }
+            pointerSent++   // count only bytes actually flushed to the socket
+        } catch (e: Exception) {
+            lastError = "ptr-write: ${e.message}"
         }
     }
 
     fun sendKey(keysym: Int, down: Boolean) {
         if (!running) return
-        keySent++
-        runCatching {
+        try {
             write {
                 output.writeByte(4)
                 output.writeByte(if (down) 1 else 0)
                 output.writeByte(0); output.writeByte(0)
                 output.writeInt(keysym)
             }
+            keySent++
+        } catch (e: Exception) {
+            lastError = "key-write: ${e.message}"
         }
     }
 

@@ -67,6 +67,17 @@ object Distros {
         }
 
     val all: List<Distro> = listOf(
+        // Our OWN pre-built image: XFCE + VNC + tools baked in and tested in CI.
+        // Installs by download only — no on-device apt, no upstream surprises.
+        Distro(
+            id = "wt-debian", name = "Debian XFCE — ready-made", pkg = PkgManager.APT, approxDownloadMb = 700,
+            resolveUrl = { arch, _ ->
+                when (arch) {
+                    "aarch64" -> "https://github.com/B760m670/What-s-that-/releases/download/images/whatsthat-debian-xfce-arm64.tar.xz"
+                    else -> error("The ready-made image is arm64-only for now")
+                }
+            },
+        ),
         Distro(
             id = "ubuntu", name = "Ubuntu 22.04", pkg = PkgManager.APT, approxDownloadMb = 250,
             resolveUrl = { arch, _ ->

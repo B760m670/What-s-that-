@@ -52,13 +52,27 @@ EOF
 chmod +x /root/.vnc/xstartup
 
 echo "[desktop] Starting XFCE on :$DISPLAY_NUM (${GEOMETRY})..."
-# -localhost: only the on-device app can reach it. SecurityTypes None because
-# the socket never leaves localhost inside the app sandbox.
-vncserver ":$DISPLAY_NUM" \
-    -geometry "$GEOMETRY" \
-    -depth "$DEPTH" \
-    -localhost yes \
-    -SecurityTypes None
+# Two TigerVNC generations: older (Ubuntu/Debian) takes options on the command
+# line; newer (Alpine) takes only the display and reads ~/.vnc/config. Try the
+# legacy form first (proven), then fall back to the config-based form.
+if vncserver ":$DISPLAY_NUM" \
+        -geometry "$GEOMETRY" \
+        -depth "$DEPTH" \
+        -localhost yes \
+        -SecurityTypes None; then
+    :
+else
+    echo "[desktop] Retrying with config-based vncserver (newer TigerVNC)…"
+    rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}" 2>/dev/null || true
+    mkdir -p /root/.vnc
+    cat > /root/.vnc/config <<EOF
+geometry=$GEOMETRY
+depth=$DEPTH
+SecurityTypes=None
+localhost
+EOF
+    vncserver ":$DISPLAY_NUM"
+fi
 
 echo "[desktop] XFCE is running."
 echo "VNC_READY 127.0.0.1:$PORT"

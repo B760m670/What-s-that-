@@ -2,4 +2,6 @@
 <paths>
     <!-- Where the self-updater saves the downloaded APK before installing. -->
     <files-path name="updates" path="updates/" />
+    <!-- The shareable session log. -->
+    <files-path name="logs" path="logs/" />
 </paths>

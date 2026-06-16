@@ -7,6 +7,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 
 /**
@@ -73,6 +74,21 @@ class DistrosActivity : AppCompatActivity() {
                 isEnabled = !isActive
                 setOnClickListener { env.activeDistro = d; finish() }
             })
+            if (isActive && installed) {
+                row.addView(Button(this).apply {
+                    text = getString(R.string.distro_close)
+                    setOnClickListener {
+                        isEnabled = false
+                        Thread {
+                            env.killSession { SessionLog.append(it) }
+                            runOnUiThread {
+                                Toast.makeText(this@DistrosActivity, "Session closed", Toast.LENGTH_SHORT).show()
+                                isEnabled = true
+                            }
+                        }.apply { isDaemon = true; start() }
+                    }
+                })
+            }
             if (installed && !isActive) {
                 row.addView(Button(this).apply {
                     text = getString(R.string.distro_remove)

@@ -5,12 +5,14 @@
     <string name="action_install_desktop">Install XFCE desktop</string>
     <string name="action_launch_desktop">Launch desktop</string>
     <string name="action_distributions">Distributions…</string>
+    <string name="action_share_log">Share log</string>
     <string name="distros_title">Distributions</string>
     <string name="distro_active">active</string>
     <string name="distro_installed">installed</string>
     <string name="distro_not_installed">not installed</string>
     <string name="distro_use">Use</string>
     <string name="distro_remove">Remove</string>
+    <string name="distro_close">Close session</string>
     <string name="status_arch">%1$s · %2$s · build %3$s</string>
     <string name="notif_running">Linux session is running</string>
     <string name="hint_no_vnc_viewer">Desktop is up at %1$s — install a VNC viewer to connect.</string>

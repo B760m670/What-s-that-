@@ -27,10 +27,12 @@ class MainActivity : AppCompatActivity() {
 
         env = LinuxEnvironment(this)
         env.prepareScripts()
+        SessionLog.init(this)
 
         refreshState()
         binding.actionButton.setOnClickListener { onAction() }
         binding.distrosButton.setOnClickListener { startActivity(Intent(this, DistrosActivity::class.java)) }
+        binding.shareLogButton.setOnClickListener { SessionLog.share(this) }
         binding.runButton.setOnClickListener { runConsoleCommand() }
         binding.cmdInput.setOnEditorActionListener { _, _, _ -> runConsoleCommand(); true }
 
@@ -122,6 +124,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun appendLog(line: String) {
+        SessionLog.append(line)   // persist so the full log survives + can be shared
         runOnUiThread {
             binding.logView.append(line + "\n")
             binding.logScroll.post { binding.logScroll.fullScroll(android.view.View.FOCUS_DOWN) }

@@ -62,7 +62,7 @@ apt-get install -f -y || true
 
 echo "[install] Installing base utilities..."
 apt-get install -y --no-install-recommends \
-    ca-certificates curl wget nano less sudo \
+    ca-certificates curl wget nano less sudo procps \
     locales dbus-x11 tzdata \
     tigervnc-standalone-server tigervnc-common \
     fonts-dejavu-core

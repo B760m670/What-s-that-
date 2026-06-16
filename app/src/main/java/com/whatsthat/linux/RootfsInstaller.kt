@@ -156,7 +156,15 @@ class RootfsInstaller(
     // --- extraction (XZ + minimal USTAR/GNU tar) -----------------------------
 
     private fun extractTarXz(tarball: File) {
-        XZInputStream(BufferedInputStream(tarball.inputStream())).use { xz ->
+        // Detect compression by magic bytes: gzip (1f 8b) vs xz (everything else
+        // we ship). Alpine's minirootfs is .tar.gz, Ubuntu/Debian are .tar.xz.
+        val buffered = BufferedInputStream(tarball.inputStream())
+        buffered.mark(4)
+        val m0 = buffered.read(); val m1 = buffered.read()
+        buffered.reset()
+        val decompressed = if (m0 == 0x1f && m1 == 0x8b)
+            java.util.zip.GZIPInputStream(buffered) else XZInputStream(buffered)
+        decompressed.use { xz ->
             val header = ByteArray(512)
             var longName: String? = null
             var longLink: String? = null

@@ -26,11 +26,20 @@ echo "[install] Profile: $PROFILE  Rootfs: $PRETTY  (app said: ${WT_DISTRO:-?})"
 # ---- Alpine (apk / musl, lightest) --------------------------------------
 if [ "$DISTRO_ID" = "alpine" ]; then
     echo "[install] Alpine detected — installing XFCE via apk…"
-    # XFCE lives in the 'community' repo; make sure it's enabled.
-    if [ -f /etc/apk/repositories ]; then
+    # XFCE lives in the 'community' repo. Enable it matching the image's own
+    # main repo; if the minirootfs ships without repos, write sane defaults.
+    mkdir -p /etc/apk
+    if grep -q '/main' /etc/apk/repositories 2>/dev/null; then
         sed -i 's|^#\(.*/community\)$|\1|' /etc/apk/repositories || true
-        grep -q '/community' /etc/apk/repositories 2>/dev/null || \
-            echo "https://dl-cdn.alpinelinux.org/alpine/v3.19/community" >> /etc/apk/repositories
+        if ! grep -q '/community' /etc/apk/repositories 2>/dev/null; then
+            MAIN=$(grep -m1 '/main$' /etc/apk/repositories)
+            echo "${MAIN%/main}/community" >> /etc/apk/repositories
+        fi
+    else
+        printf '%s\n%s\n' \
+            "https://dl-cdn.alpinelinux.org/alpine/latest-stable/main" \
+            "https://dl-cdn.alpinelinux.org/alpine/latest-stable/community" \
+            > /etc/apk/repositories
     fi
     apk update || apk update || echo "[install] apk update had errors — continuing."
     apk add --no-cache \

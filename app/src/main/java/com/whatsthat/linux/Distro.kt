@@ -44,6 +44,26 @@ object Distros {
             "$base$ts/rootfs.tar.xz"
         }
 
+    /**
+     * Resolve the newest Alpine minirootfs from Alpine's own CDN (tiny, ~3 MB,
+     * always available). The patch version changes, so read the directory.
+     */
+    private fun alpineMinirootfs(): (String, (String) -> String) -> String =
+        { arch, http ->
+            val a = when (arch) {
+                "aarch64" -> "aarch64"
+                "x86_64" -> "x86_64"
+                "arm" -> "armv7"
+                else -> error("Unsupported arch: $arch")
+            }
+            val base = "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/$a/"
+            val listing = http(base)
+            val file = Regex("""alpine-minirootfs-[0-9][0-9.]*-$a\.tar\.gz""")
+                .findAll(listing).map { it.value }.distinct().toList().maxOrNull()
+                ?: error("No Alpine minirootfs found for $a")
+            base + file
+        }
+
     val all: List<Distro> = listOf(
         Distro(
             id = "ubuntu", name = "Ubuntu 22.04", pkg = PkgManager.APT, approxDownloadMb = 250,
@@ -58,8 +78,8 @@ object Distros {
             resolveUrl = lxc("debian", "bookworm"),
         ),
         Distro(
-            id = "alpine", name = "Alpine 3.19 (lightest)", pkg = PkgManager.APK, approxDownloadMb = 4,
-            resolveUrl = lxc("alpine", "3.19"), experimental = true,
+            id = "alpine", name = "Alpine (lightest)", pkg = PkgManager.APK, approxDownloadMb = 4,
+            resolveUrl = alpineMinirootfs(), experimental = true,
         ),
     )
 

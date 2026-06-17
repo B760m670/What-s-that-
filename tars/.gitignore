@@ -1,0 +1,10 @@
+# Secrets and local state
+.env
+*.db
+.tars/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/

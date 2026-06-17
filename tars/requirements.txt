@@ -1,0 +1,10 @@
+# Milestone 1 needs only the Python standard library:
+#   - cloud brains (Gemini/Groq) are called via urllib
+#   - local brain via Ollama's HTTP API
+#   - memory via sqlite3
+#
+# Later milestones add (kept here for reference):
+#   openwakeword        # wake word ("Hey TARS")
+#   vosk                # offline speech-to-text
+#   sherpa-onnx         # on-device neural TTS runtime
+#   TTS / f5-tts        # AI voice cloning of the original TARS voice

@@ -95,8 +95,14 @@ object Distros {
             resolveUrl = alpineMinirootfs(), experimental = true,
         ),
         Distro(
-            id = "windows", name = "Windows apps (Wine)", pkg = PkgManager.APT, approxDownloadMb = 120,
-            resolveUrl = lxc("debian", "bookworm"), experimental = true, wine = true,
+            id = "windows", name = "Windows apps (Wine)", pkg = PkgManager.APT, approxDownloadMb = 500,
+            resolveUrl = { arch, _ ->
+                when (arch) {
+                    "aarch64" -> "https://github.com/B760m670/What-s-that-/releases/download/images/whatsthat-debian-wine-arm64.tar.xz"
+                    else -> error("The Wine image is arm64-only for now")
+                }
+            },
+            experimental = true, wine = true,
         ),
     )
 

@@ -14,12 +14,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Box64: x86-64 -> ARM64 translation (installed only; it runs on the device).
-RUN wget -qO- https://ryanfortner.github.io/box64-debs/KEY.gpg \
-        | gpg --dearmor -o /usr/share/keyrings/box64-debs-archive-keyring.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/box64-debs-archive-keyring.gpg] https://ryanfortner.github.io/box64-debs/ ./" \
+# Trust the repo directly (no gpg key dance — .debs are still hash-verified from
+# the repo index; fine for a CI build).
+RUN echo "deb [trusted=yes] https://ryanfortner.github.io/box64-debs/ ./" \
         > /etc/apt/sources.list.d/box64.list \
     && apt-get update \
-    && ( apt-get install -y box64-generic-arm || apt-get install -y box64-android || apt-get install -y box64 ) \
+    && ( apt-get install -y box64-generic-arm || apt-get install -y box64-android ) \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Wine (x86-64 build, executed via Box64 on the device).

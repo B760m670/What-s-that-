@@ -13,13 +13,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         sudo nano less ca-certificates curl wget gnupg xz-utils cabextract \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Box64: x86-64 -> ARM64 translation (installed only; it runs on the device).
-# Trust the repo directly (no gpg key dance — .debs are still hash-verified from
-# the repo index; fine for a CI build).
-RUN echo "deb [trusted=yes] https://ryanfortner.github.io/box64-debs/ ./" \
-        > /etc/apt/sources.list.d/box64.list \
-    && apt-get update \
-    && ( apt-get install -y box64-generic-arm || apt-get install -y box64-android ) \
+# Box64: x86-64 -> ARM64 translation. Built FROM SOURCE (the third-party apt repo
+# 404s and we want this under our control). Produces an arm64 binary that runs
+# x86-64 on the device; build tools are purged afterwards to keep the image lean.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git ca-certificates build-essential cmake python3 \
+    && git clone --depth 1 https://github.com/ptitSeb/box64 /tmp/box64 \
+    && cmake -S /tmp/box64 -B /tmp/box64/build \
+        -DARM_DYNAREC=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    && cmake --build /tmp/box64/build -j"$(nproc)" \
+    && cmake --install /tmp/box64/build \
+    && rm -rf /tmp/box64 \
+    && apt-get purge -y git cmake \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Wine (x86-64 build, executed via Box64 on the device).

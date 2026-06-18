@@ -1,5 +1,6 @@
 package com.whatsthat.linux
 
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
@@ -82,6 +83,11 @@ class DistrosActivity : AppCompatActivity() {
                         Thread {
                             env.killSession { SessionLog.append(it) }
                             runOnUiThread {
+                                // Also drop the foreground "session running" service
+                                // so nothing keeps the session alive after closing.
+                                runCatching {
+                                    stopService(Intent(this@DistrosActivity, LinuxSessionService::class.java))
+                                }
                                 Toast.makeText(this@DistrosActivity, "Session closed", Toast.LENGTH_SHORT).show()
                                 isEnabled = true
                             }

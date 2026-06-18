@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [debian-xfce, debian-wine]
+        image: [debian-xfce, ubuntu-xfce, debian-wine]
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3

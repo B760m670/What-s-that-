@@ -109,7 +109,9 @@ class MainActivity : AppCompatActivity() {
     private fun launchVncViewer(endpoint: String) {
         val parts = endpoint.split(":")
         val host = parts.getOrElse(0) { "127.0.0.1" }
-        val port = parts.getOrNull(1)?.toIntOrNull() ?: 5901
+        // Reject a missing/zero port (would surface as "connect to port 0"); the
+        // desktop always serves display :1 on 5901.
+        val port = parts.getOrNull(1)?.toIntOrNull()?.takeIf { it > 0 } ?: 5901
         appendLog("Opening desktop viewer ($host:$port)…")
         // A foreground-service failure must not block the viewer from opening.
         runCatching { ContextCompat.startForegroundService(this, Intent(this, LinuxSessionService::class.java)) }

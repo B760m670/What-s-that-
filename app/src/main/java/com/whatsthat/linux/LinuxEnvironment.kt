@@ -33,7 +33,10 @@ class LinuxEnvironment(context: Context) {
     // The desktop/wine installer writes this marker when it finishes (works for
     // XFCE, Openbox, or the Wine environment alike).
     fun desktopReady(d: Distro) = File(distroDir(d), "root/.wt-desktop-ready").exists()
-    fun removeDistro(d: Distro) { distroDir(d).deleteRecursively() }
+    fun removeDistro(d: Distro) {
+        distroDir(d).deleteRecursively()
+        File(distrosDir, "${d.id}.tmp").deleteRecursively()   // its per-distro /tmp
+    }
 
     /** Bytes occupied on disk by an installed distro (walks its rootfs). */
     fun installedSizeBytes(d: Distro): Long =

@@ -27,12 +27,10 @@ class MainActivity : AppCompatActivity() {
 
         env = LinuxEnvironment(this)
         env.prepareScripts()
-        SessionLog.init(this)
 
         refreshState()
         binding.actionButton.setOnClickListener { onAction() }
         binding.distrosButton.setOnClickListener { startActivity(Intent(this, DistrosActivity::class.java)) }
-        binding.shareLogButton.setOnClickListener { SessionLog.share(this) }
         binding.runButton.setOnClickListener { runConsoleCommand() }
         binding.cmdInput.setOnEditorActionListener { _, _, _ -> runConsoleCommand(); true }
 
@@ -109,9 +107,7 @@ class MainActivity : AppCompatActivity() {
     private fun launchVncViewer(endpoint: String) {
         val parts = endpoint.split(":")
         val host = parts.getOrElse(0) { "127.0.0.1" }
-        // Reject a missing/zero port (would surface as "connect to port 0"); the
-        // desktop always serves display :1 on 5901.
-        val port = parts.getOrNull(1)?.toIntOrNull()?.takeIf { it > 0 } ?: 5901
+        val port = parts.getOrNull(1)?.toIntOrNull() ?: 5901
         appendLog("Opening desktop viewer ($host:$port)…")
         // A foreground-service failure must not block the viewer from opening.
         runCatching { ContextCompat.startForegroundService(this, Intent(this, LinuxSessionService::class.java)) }
@@ -126,7 +122,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun appendLog(line: String) {
-        SessionLog.append(line)   // persist so the full log survives + can be shared
         runOnUiThread {
             binding.logView.append(line + "\n")
             binding.logScroll.post { binding.logScroll.fullScroll(android.view.View.FOCUS_DOWN) }

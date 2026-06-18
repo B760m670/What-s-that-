@@ -23,38 +23,6 @@ if [ -r /etc/os-release ]; then
 fi
 echo "[install] Profile: $PROFILE  Rootfs: $PRETTY  (app said: ${WT_DISTRO:-?})"
 
-# ---- Alpine (apk / musl, lightest) --------------------------------------
-if [ "$DISTRO_ID" = "alpine" ]; then
-    echo "[install] Alpine detected — installing XFCE via apk…"
-    # XFCE lives in the 'community' repo. Enable it matching the image's own
-    # main repo; if the minirootfs ships without repos, write sane defaults.
-    mkdir -p /etc/apk
-    if grep -q '/main' /etc/apk/repositories 2>/dev/null; then
-        sed -i 's|^#\(.*/community\)$|\1|' /etc/apk/repositories || true
-        if ! grep -q '/community' /etc/apk/repositories 2>/dev/null; then
-            MAIN=$(grep -m1 '/main$' /etc/apk/repositories)
-            echo "${MAIN%/main}/community" >> /etc/apk/repositories
-        fi
-    else
-        printf '%s\n%s\n' \
-            "https://dl-cdn.alpinelinux.org/alpine/latest-stable/main" \
-            "https://dl-cdn.alpinelinux.org/alpine/latest-stable/community" \
-            > /etc/apk/repositories
-    fi
-    apk update || apk update || echo "[install] apk update had errors — continuing."
-    apk add --no-cache \
-        dbus dbus-x11 tigervnc \
-        xfce4 xfce4-terminal \
-        adwaita-icon-theme hicolor-icon-theme gdk-pixbuf librsvg \
-        ttf-dejavu \
-        bash sudo nano shadow setpriv \
-        || echo "[install] some Alpine packages failed — desktop may still work."
-    touch /root/.wt-desktop-ready
-    echo "[install] Desktop installed (alpine)."
-    exit 0
-fi
-
-# ---- Ubuntu / Debian (apt) ----------------------------------------------
 # Only Ubuntu's cloud image ships a stale/edited sources.list that needs a full
 # rewrite. Debian (and other images) already have a correct, signed sources.list
 # with the matching keyring, so leave theirs untouched.
@@ -138,5 +106,4 @@ dbus-launch --exit-with-session $SESSION_CMD
 EOF
 chmod +x /root/.vnc/xstartup
 
-touch /root/.wt-desktop-ready
 echo "[install] Desktop installed (profile: $PROFILE)."

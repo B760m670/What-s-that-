@@ -41,17 +41,7 @@ class RootfsInstaller(
             val url = distro.resolveUrl(arch) { httpText(it) }
             val fname = url.substringAfterLast('/')
             onLog("[bootstrap] Downloading $fname …")
-            var dlErr: Exception? = null
-            var ok = false
-            for (attempt in 1..3) {
-                try { download(url, tarball); ok = true; break }
-                catch (e: Exception) {
-                    dlErr = e
-                    onLog("[bootstrap] download attempt $attempt failed (${e.message}); retrying…")
-                    Thread.sleep(2000L * attempt)
-                }
-            }
-            if (!ok) throw dlErr ?: RuntimeException("download failed")
+            download(url, tarball)
 
             val expected = distro.checksumUrl?.let { sumsUrl ->
                 runCatching { fetchSha256(sumsUrl(arch), fname) }.getOrNull()
@@ -97,8 +87,8 @@ class RootfsInstaller(
         repeat(6) {
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 instanceFollowRedirects = false
-                connectTimeout = 30000
-                readTimeout = 60000
+                connectTimeout = 15000
+                readTimeout = 30000
                 setRequestProperty("User-Agent", "WhatsThatLinux")
             }
             when (conn.responseCode) {
@@ -166,15 +156,7 @@ class RootfsInstaller(
     // --- extraction (XZ + minimal USTAR/GNU tar) -----------------------------
 
     private fun extractTarXz(tarball: File) {
-        // Detect compression by magic bytes: gzip (1f 8b) vs xz (everything else
-        // we ship). Alpine's minirootfs is .tar.gz, Ubuntu/Debian are .tar.xz.
-        val buffered = BufferedInputStream(tarball.inputStream())
-        buffered.mark(4)
-        val m0 = buffered.read(); val m1 = buffered.read()
-        buffered.reset()
-        val decompressed = if (m0 == 0x1f && m1 == 0x8b)
-            java.util.zip.GZIPInputStream(buffered) else XZInputStream(buffered)
-        decompressed.use { xz ->
+        XZInputStream(BufferedInputStream(tarball.inputStream())).use { xz ->
             val header = ByteArray(512)
             var longName: String? = null
             var longLink: String? = null

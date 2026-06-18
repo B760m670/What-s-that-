@@ -44,11 +44,8 @@ class VncActivity : AppCompatActivity() {
             setBackgroundColor(Color.BLACK)
             addView(canvas, FrameLayout.LayoutParams(-1, -1))
             addView(status, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
-            val m = (16 * resources.displayMetrics.density).toInt()
             addView(keyboardButton(), FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply {
-                setMargins(m, m, m, m)
-            })
-            addView(logButton(), FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START).apply {
+                val m = (16 * resources.displayMetrics.density).toInt()
                 setMargins(m, m, m, m)
             })
         }
@@ -93,13 +90,6 @@ class VncActivity : AppCompatActivity() {
             val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.showSoftInput(canvas, InputMethodManager.SHOW_FORCED)
         }
-    }
-
-    /** Share the full session log without leaving the running desktop. */
-    private fun logButton() = Button(this).apply {
-        text = getString(R.string.action_share_log)
-        alpha = 0.85f
-        setOnClickListener { SessionLog.share(this@VncActivity) }
     }
 
     override fun onDestroy() {

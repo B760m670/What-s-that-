@@ -35,16 +35,6 @@ fi
 #   -w  initial working dir     -b  bind host paths into the guest
 # (We deliberately do NOT pass --kill-on-exit: the VNC server must survive
 #  after start-desktop.sh's proot invocation returns.)
-#
-# Per-distro /tmp: each rootfs gets its OWN host tmp dir. A shared /tmp let a
-# crashed session in one distro leave stale X locks (/tmp/.X1-lock, the
-# /tmp/.X11-unix/X1 socket) that blocked every other distro's VNC server from
-# claiming display :1 — so "one broken distro breaks them all". Isolating /tmp
-# per rootfs stops that cross-contamination.
-GUEST_TMP="${ROOTFS}.tmp"
-mkdir -p "$GUEST_TMP" 2>/dev/null || true
-chmod 1777 "$GUEST_TMP" 2>/dev/null || true
-
 exec "$PROOT" \
     --link2symlink \
     -0 \
@@ -53,7 +43,7 @@ exec "$PROOT" \
     -b /dev \
     -b /proc \
     -b /sys \
-    -b "$GUEST_TMP:/tmp" \
+    -b "$WT_HOME/tmp:/tmp" \
     /usr/bin/env -i \
         HOME=/root \
         USER=root \

@@ -1,12 +1,10 @@
-# Custom "Windows apps (Wine)" rootfs: Debian + light Openbox desktop + Box64
-# (x86-64 -> ARM64) + Wine, all baked in & built in CI. The app downloads this
-# ready image — no on-device apt/box64/wine install. EXPERIMENTAL: on a Mali GPU
-# only software rendering is available, so expect simple/old programs, not games.
+# Custom "Windows apps (Wine)" rootfs: Debian + XFCE desktop + a browser +
+# Box64 (x86-64 -> ARM64) + Wine, all baked in & built in CI. Gives a real
+# desktop (menu, panel, file manager) that also runs Windows .exe via Wine.
+# EXPERIMENTAL: on a Mali GPU only software rendering — simple/old programs,
+# not modern games.
 
 # --- Stage 1: cross-compile Box64 on the NATIVE build host (fast). -----------
-# Building Box64 inside the arm64 image would run under QEMU and take 40+ min.
-# Here we build on the runner's native x86-64 with an aarch64 cross-compiler
-# (~2 min) and copy the finished arm64 binary into the real image.
 FROM --platform=$BUILDPLATFORM debian:bookworm AS box64
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -25,12 +23,16 @@ RUN git clone --depth 1 https://github.com/ptitSeb/box64 /tmp/box64 \
 FROM debian:bookworm
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Light desktop to host Wine windows + tools.
+# A real XFCE desktop (menu, panel, file manager) + a browser + tools, so this
+# isn't a bare window manager but something usable that also hosts Wine.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        openbox tint2 xterm pcmanfm \
+        xfce4 xfce4-terminal xfce4-goodies thunar \
         dbus-x11 tigervnc-standalone-server tigervnc-common \
         fonts-dejavu-core procps \
-        sudo nano less ca-certificates curl wget gnupg xz-utils cabextract \
+        sudo nano less ca-certificates curl wget gnupg xz-utils cabextract zenity \
+        firefox-esr mousepad \
+        locales tzdata \
+    && sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && locale-gen \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Drop in the cross-compiled Box64 (arm64) binary.
@@ -38,8 +40,7 @@ COPY --from=box64 /tmp/box64/build/box64 /usr/local/bin/box64
 RUN chmod +x /usr/local/bin/box64
 
 # x86_64 runtime libs that Box64 needs to load Wine's emulated .so files — e.g.
-# Wine's ntdll.so links libgcc_s.so.1, which must exist as x86_64 (the rootfs is
-# arm64). Enable amd64 multiarch and install the small runtime set.
+# Wine's ntdll.so links libgcc_s.so.1, which must exist as x86_64 (rootfs is arm64).
 RUN dpkg --add-architecture amd64 \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -59,6 +60,16 @@ RUN printf '#!/bin/sh\nexport WINEPREFIX="${WINEPREFIX:-/root/.wine}"\nexport BO
         > /usr/local/bin/wine \
     && cp /usr/local/bin/wine /usr/local/bin/wine64 \
     && chmod +x /usr/local/bin/wine /usr/local/bin/wine64
+
+# A friendly "Run Windows program (.exe)" launcher: pick a file, run it in Wine.
+# Shows up in the XFCE applications menu. (Installed Windows apps also add their
+# own menu entries automatically.)
+RUN printf '#!/bin/sh\nf="$(zenity --file-selection --title="Choose a Windows .exe" 2>/dev/null)" || exit 0\n[ -n "$f" ] && exec wine "$f"\n' \
+        > /usr/local/bin/run-exe \
+    && chmod +x /usr/local/bin/run-exe \
+    && mkdir -p /usr/share/applications \
+    && printf '[Desktop Entry]\nType=Application\nName=Run Windows program (.exe)\nExec=run-exe\nIcon=wine\nTerminal=false\nCategories=Wine;Utility;\n' \
+        > /usr/share/applications/run-windows-exe.desktop
 
 # Mark the desktop as ready so the app launches it directly (no on-device apt).
 RUN touch /root/.wt-desktop-ready

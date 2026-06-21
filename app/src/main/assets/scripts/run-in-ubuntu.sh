@@ -27,6 +27,13 @@ if [ -n "${WT_NATIVE_LIB:-}" ]; then
     [ -f "$WT_NATIVE_LIB/libloader32.so" ] && export PROOT_LOADER_32="$WT_NATIVE_LIB/libloader32.so"
 fi
 
+# Browsers (Firefox/Chromium) need a writable /dev/shm for shared memory; the
+# bound Android /dev usually has none, which crashes their content processes
+# ("Your tab just crashed"). Provide a real one from app storage.
+SHM_DIR="$WT_HOME/tmp/shm"
+mkdir -p "$SHM_DIR" 2>/dev/null || true
+chmod 1777 "$SHM_DIR" 2>/dev/null || true
+
 # proot flags (Termux proot):
 #   --link2symlink  emulate hardlinks as symlinks — ESSENTIAL: Android's app
 #                   filesystem refuses hardlinks, which breaks dpkg/apt (they
@@ -41,6 +48,7 @@ exec "$PROOT" \
     -r "$ROOTFS" \
     -w /root \
     -b /dev \
+    -b "$SHM_DIR:/dev/shm" \
     -b /proc \
     -b /sys \
     -b "$WT_HOME/tmp:/tmp" \
@@ -51,6 +59,9 @@ exec "$PROOT" \
         LANG=C.UTF-8 \
         PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
         DISPLAY=:1 \
+        MOZ_DISABLE_CONTENT_SANDBOX=1 \
+        MOZ_DISABLE_GMP_SANDBOX=1 \
+        MOZ_DISABLE_RDD_SANDBOX=1 \
         WT_PROFILE="${WT_PROFILE:-full}" \
         WT_VARIANT="${WT_VARIANT:-standard}" \
         WT_GEOMETRY="${WT_GEOMETRY:-1280x720}" \

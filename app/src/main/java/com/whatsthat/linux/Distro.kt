@@ -55,8 +55,18 @@ object Distros {
             id = "debian", name = "Debian 12 (Bookworm)", pkg = PkgManager.APT,
             resolveUrl = lxc("debian", "bookworm"),
         ),
-        // Alpine (apk/musl, no bash) is the next addition — it needs its own
-        // install path, so it's intentionally not offered yet.
+        // Our OWN pre-built image: Box64 + Wine + a light Openbox desktop baked
+        // in (built in CI). EXPERIMENTAL — on a Mali GPU only software rendering
+        // is available, so expect simple/old Windows programs, not games.
+        Distro(
+            id = "windows", name = "Windows apps (Wine) — experimental", pkg = PkgManager.APT,
+            resolveUrl = { arch, _ ->
+                if (arch == "aarch64")
+                    "https://github.com/B760m670/What-s-that-/releases/download/images/whatsthat-debian-wine-arm64.tar.xz"
+                else error("The Wine image is arm64-only for now")
+            },
+            experimental = true,
+        ),
     )
 
     fun byId(id: String): Distro = all.firstOrNull { it.id == id } ?: all.first()

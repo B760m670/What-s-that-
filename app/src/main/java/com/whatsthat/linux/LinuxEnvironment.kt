@@ -35,7 +35,11 @@ class LinuxEnvironment(context: Context) {
     // not found". Re-checking a real file makes the app reinstall cleanly.
     fun rootfsReady(d: Distro) =
         File(distroDir(d), ".bootstrap-done").exists() && File(distroDir(d), "usr/bin/env").exists()
-    fun desktopReady(d: Distro) = File(distroDir(d), "usr/bin/startxfce4").exists()
+    // Desktop is ready if XFCE was installed on-device (Ubuntu/Debian) OR the
+    // distro is one of our pre-built images that bakes the marker (the Wine one).
+    fun desktopReady(d: Distro) =
+        File(distroDir(d), "usr/bin/startxfce4").exists() ||
+        File(distroDir(d), "root/.wt-desktop-ready").exists()
     fun removeDistro(d: Distro) { distroDir(d).deleteRecursively() }
 
     /** Move a v1 install (filesDir/ubuntu) into the per-distro layout, once. */

@@ -39,6 +39,17 @@ if command -v startxfce4 >/dev/null 2>&1; then SESSION_CMD="startxfce4"
 elif command -v openbox-session >/dev/null 2>&1; then SESSION_CMD="openbox-session"
 elif command -v startlxqt >/dev/null 2>&1; then SESSION_CMD="startlxqt"
 else SESSION_CMD="xterm"; fi
+
+# Openbox on its own shows only a bare background + cursor, and touch VNC has no
+# right-click to reach its menu. Autostart a panel and a terminal so there's an
+# immediately usable desktop (e.g. to run `wine notepad`).
+if [ "$SESSION_CMD" = "openbox-session" ]; then
+    mkdir -p /root/.config/openbox
+    cat > /root/.config/openbox/autostart <<'EOF'
+command -v tint2 >/dev/null 2>&1 && tint2 &
+command -v xterm >/dev/null 2>&1 && xterm -geometry 110x30+30+30 &
+EOF
+fi
 mkdir -p /root/.vnc
 cat > /root/.vnc/xstartup <<EOF
 #!/bin/sh

@@ -28,9 +28,18 @@ class RootfsInstaller(
 ) {
     /** Returns 0 on success, non-zero on failure. */
     fun install(): Int {
-        if (File(rootfs, ".bootstrap-done").exists()) {
+        val marker = File(rootfs, ".bootstrap-done")
+        val sentinel = File(rootfs, "usr/bin/env")   // present in every base rootfs
+        if (marker.exists() && sentinel.exists()) {
             onLog("[bootstrap] ${distro.name} already installed.")
             return 0
+        }
+        // A leftover marker with the files gone (a half-removed or corrupted
+        // install) would otherwise be trusted, and proot then fails with
+        // "/usr/bin/env not found". Wipe the stale state and reinstall clean.
+        if (rootfs.exists()) {
+            onLog("[bootstrap] ${distro.name} is incomplete — reinstalling from scratch.")
+            rootfs.deleteRecursively()
         }
         return try {
             rootfs.mkdirs()

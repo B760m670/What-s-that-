@@ -29,7 +29,12 @@ class LinuxEnvironment(context: Context) {
         get() = Distros.byId(prefs.getString("active_distro", "ubuntu") ?: "ubuntu")
         set(v) { prefs.edit().putString("active_distro", v.id).apply() }
 
-    fun rootfsReady(d: Distro) = File(distroDir(d), ".bootstrap-done").exists()
+    // Treat a distro as installed only if the rootfs is actually there — a
+    // leftover .bootstrap-done marker with the files gone (a corrupted/half
+    // removed install) must not be trusted, or proot fails with "/usr/bin/env
+    // not found". Re-checking a real file makes the app reinstall cleanly.
+    fun rootfsReady(d: Distro) =
+        File(distroDir(d), ".bootstrap-done").exists() && File(distroDir(d), "usr/bin/env").exists()
     fun desktopReady(d: Distro) = File(distroDir(d), "usr/bin/startxfce4").exists()
     fun removeDistro(d: Distro) { distroDir(d).deleteRecursively() }
 

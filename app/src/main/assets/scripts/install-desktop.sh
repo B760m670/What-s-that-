@@ -65,6 +65,7 @@ apt-get install -y --no-install-recommends \
     ca-certificates curl wget nano less sudo procps \
     locales dbus-x11 tzdata \
     tigervnc-standalone-server tigervnc-common \
+    pulseaudio pulseaudio-utils \
     fonts-dejavu-core
 
 # Generate a UTF-8 locale so apps render correctly.

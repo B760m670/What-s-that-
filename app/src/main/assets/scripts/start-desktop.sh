@@ -50,6 +50,22 @@ command -v tint2 >/dev/null 2>&1 && tint2 &
 command -v xterm >/dev/null 2>&1 && xterm -geometry 110x30+30+30 &
 EOF
 fi
+
+# Audio: the container can't reach the speaker directly. Run PulseAudio here,
+# route everything to a null sink, and stream that sink's PCM over loopback TCP
+# (s16le/48k/stereo) — the app's AudioBridge reads 127.0.0.1:4712 and plays it.
+if command -v pulseaudio >/dev/null 2>&1; then
+    pulseaudio --kill >/dev/null 2>&1 || true
+    sleep 1
+    pulseaudio --start --exit-idle-time=-1 --disable-shm=true >/dev/null 2>&1 || true
+    sleep 1
+    pactl load-module module-null-sink sink_name=wt \
+        sink_properties=device.description=WhatsThat >/dev/null 2>&1 || true
+    pactl set-default-sink wt >/dev/null 2>&1 || true
+    pactl load-module module-simple-protocol-tcp record=true source=wt.monitor \
+        listen=127.0.0.1 port=4712 format=s16le rate=48000 channels=2 >/dev/null 2>&1 || true
+fi
+
 mkdir -p /root/.vnc
 cat > /root/.vnc/xstartup <<EOF
 #!/bin/sh

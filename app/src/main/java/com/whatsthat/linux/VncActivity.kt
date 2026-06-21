@@ -23,6 +23,7 @@ class VncActivity : AppCompatActivity() {
     private var client: VncClient? = null
     private lateinit var canvas: VncCanvasView
     private val env by lazy { LinuxEnvironment(this) }
+    private val audio = AudioBridge()
     @Volatile private var closing = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,6 +55,7 @@ class VncActivity : AppCompatActivity() {
             canvas.client = it
             it.start()
         }
+        audio.start()   // play the desktop's sound through the phone speaker
     }
 
     /** Bottom-right floating controls: close session, then keyboard. Kept small
@@ -89,6 +91,7 @@ class VncActivity : AppCompatActivity() {
         closing = true
         Toast.makeText(this, "Closing session…", Toast.LENGTH_SHORT).show()
         client?.stop()
+        audio.stop()
         Thread {
             runCatching { env.prepareScripts() }   // ensure kill-session.sh is present
             runCatching { env.killSession {} }
@@ -101,6 +104,7 @@ class VncActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         client?.stop()
+        audio.stop()
         super.onDestroy()
     }
 

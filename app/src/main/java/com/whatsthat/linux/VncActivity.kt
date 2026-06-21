@@ -35,7 +35,7 @@ class VncActivity : AppCompatActivity() {
             setBackgroundColor(Color.BLACK)
             addView(canvas, FrameLayout.LayoutParams(-1, -1))
             addView(controls(), FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply {
-                val m = (16 * resources.displayMetrics.density).toInt()
+                val m = (6 * resources.displayMetrics.density).toInt()
                 setMargins(m, m, m, m)
             })
         }
@@ -56,23 +56,30 @@ class VncActivity : AppCompatActivity() {
         }
     }
 
-    /** Bottom-right floating controls: close session, then keyboard. */
+    /** Bottom-right floating controls: close session, then keyboard. Kept small
+     *  and tucked into the corner so they barely touch the desktop. */
     private fun controls() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        addView(Button(context).apply {
-            text = getString(R.string.close_session)
-            alpha = 0.85f
-            setOnClickListener { closeSession() }
-        })
-        addView(Button(context).apply {
-            text = getString(R.string.show_keyboard)
-            alpha = 0.85f
-            setOnClickListener {
-                canvas.requestFocus()
-                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                imm.showSoftInput(canvas, InputMethodManager.SHOW_FORCED)
-            }
-        })
+        val gap = (6 * resources.displayMetrics.density).toInt()
+        addView(smallButton(getString(R.string.close_session)) { closeSession() })
+        addView(smallButton(getString(R.string.show_keyboard)) {
+            canvas.requestFocus()
+            (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+                .showSoftInput(canvas, InputMethodManager.SHOW_FORCED)
+        }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = gap })
+    }
+
+    /** A compact, translucent floating button (no default min-size/insets). */
+    private fun smallButton(label: String, onClick: () -> Unit) = Button(this).apply {
+        text = label
+        textSize = 12f
+        minWidth = 0; minHeight = 0
+        minimumWidth = 0; minimumHeight = 0
+        val p = (8 * resources.displayMetrics.density).toInt()
+        setPadding(p, p, p, p)
+        alpha = 0.8f
+        stateListAnimator = null
+        setOnClickListener { onClick() }
     }
 
     /** End the session: kill the VNC server, drop the notification, and leave

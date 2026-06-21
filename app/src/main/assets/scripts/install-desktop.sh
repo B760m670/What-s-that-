@@ -81,12 +81,28 @@ else
     echo "[install] Installing XFCE desktop..."
     apt-get install -y --no-install-recommends \
         xfce4 xfce4-terminal xfce4-goodies
-    echo "[install] Installing everyday tools (browser, files, editor)..."
+    echo "[install] Installing everyday tools (files, editor, dev)..."
     apt-get install -y --no-install-recommends \
-        firefox-esr mousepad ristretto \
+        mousepad ristretto \
         git python3 python3-pip build-essential \
         htop neofetch || \
         echo "[install] Some optional tools failed — desktop still usable."
+
+    # Browser: install it on its OWN so a missing package can't sink the tools
+    # above. firefox-esr only exists on Debian (Ubuntu ships Firefox as a snap,
+    # which can't run under proot), so fall back to a real .deb browser that
+    # exists on whichever distro this is.
+    echo "[install] Installing a web browser..."
+    BROWSER_OK=0
+    for b in firefox-esr epiphany-browser falkon midori netsurf-gtk; do
+        if apt-get install -y --no-install-recommends "$b"; then
+            echo "[install] Browser installed: $b"
+            update-alternatives --quiet --set x-www-browser "/usr/bin/$b" 2>/dev/null || true
+            BROWSER_OK=1
+            break
+        fi
+    done
+    [ "$BROWSER_OK" = 1 ] || echo "[install] No browser available — add one later via the console."
     SESSION_CMD="startxfce4"
 fi
 

@@ -29,6 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         xfce4 xfce4-terminal xfce4-goodies thunar \
         dbus-x11 tigervnc-standalone-server tigervnc-common \
         pulseaudio pulseaudio-utils \
+        mesa-utils \
         fonts-dejavu-core procps \
         sudo nano less ca-certificates curl wget gnupg xz-utils cabextract zenity \
         firefox-esr mousepad \

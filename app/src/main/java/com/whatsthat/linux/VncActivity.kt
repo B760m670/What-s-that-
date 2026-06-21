@@ -4,28 +4,26 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.view.Gravity
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.FrameLayout
-import android.widget.TextView
+import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 
 /**
  * Full-screen host for the embedded VNC desktop. Connects to the loopback
  * display started by start-desktop.sh and renders it via [VncCanvasView].
- * A floating button toggles the soft keyboard for typing into the desktop, and
- * a thin status line shows live connection/input diagnostics.
+ * Floating buttons let the user pop the soft keyboard and close the session;
+ * there's no status overlay so nothing covers the desktop.
  */
 class VncActivity : AppCompatActivity() {
 
     private var client: VncClient? = null
     private lateinit var canvas: VncCanvasView
-    private lateinit var status: TextView
-    private val ui = Handler(Looper.getMainLooper())
+    private val env by lazy { LinuxEnvironment(this) }
+    @Volatile private var closing = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -33,67 +31,68 @@ class VncActivity : AppCompatActivity() {
         val port = intent.getIntExtra(EXTRA_PORT, 5901)
 
         canvas = VncCanvasView(this)
-        status = TextView(this).apply {
-            setBackgroundColor(0x99000000.toInt())
-            setTextColor(Color.WHITE)
-            textSize = 11f
-            setPadding(12, 6, 12, 6)
-            text = "connecting to $host:$port…"
-        }
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             addView(canvas, FrameLayout.LayoutParams(-1, -1))
-            addView(status, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
-            addView(keyboardButton(), FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply {
+            addView(controls(), FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply {
                 val m = (16 * resources.displayMetrics.density).toInt()
                 setMargins(m, m, m, m)
             })
         }
         setContentView(root)
 
+        Toast.makeText(this, "Connecting to the desktop…", Toast.LENGTH_SHORT).show()
         client = VncClient(
             host = host,
             port = port,
             onConnected = { _, _, bmp -> runOnUiThread { canvas.setFrame(bmp) } },
             onFrame = { runOnUiThread { canvas.invalidate() } },
-            onError = { msg -> runOnUiThread {
-                Toast.makeText(this, "VNC: $msg", Toast.LENGTH_LONG).show()
-                // don't auto-close: keep the status line visible for diagnosis
-            } },
+            onError = { msg ->
+                runOnUiThread { if (!closing) Toast.makeText(this, "VNC: $msg", Toast.LENGTH_LONG).show() }
+            },
         ).also {
             canvas.client = it
             it.start()
         }
-        startStatusUpdates()
     }
 
-    /** Refresh the diagnostic status line ~1×/sec. */
-    private fun startStatusUpdates() {
-        ui.post(object : Runnable {
-            override fun run() {
-                client?.let { c ->
-                    status.text = "conn:${if (c.isRunning) "Y" else "N"}  " +
-                        "fb:${c.fbWidth}x${c.fbHeight}  frames:${c.framesReceived}  " +
-                        "ptr:${c.pointerSent}  key:${c.keySent}" +
-                        (c.lastError?.let { "  err:$it" } ?: "")
-                }
-                ui.postDelayed(this, 1000)
+    /** Bottom-right floating controls: close session, then keyboard. */
+    private fun controls() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        addView(Button(context).apply {
+            text = getString(R.string.close_session)
+            alpha = 0.85f
+            setOnClickListener { closeSession() }
+        })
+        addView(Button(context).apply {
+            text = getString(R.string.show_keyboard)
+            alpha = 0.85f
+            setOnClickListener {
+                canvas.requestFocus()
+                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                imm.showSoftInput(canvas, InputMethodManager.SHOW_FORCED)
             }
         })
     }
 
-    private fun keyboardButton() = Button(this).apply {
-        text = getString(R.string.show_keyboard)
-        alpha = 0.85f
-        setOnClickListener {
-            canvas.requestFocus()
-            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.showSoftInput(canvas, InputMethodManager.SHOW_FORCED)
-        }
+    /** End the session: kill the VNC server, drop the notification, and leave
+     *  (back to the main screen, where another distro can be picked). */
+    private fun closeSession() {
+        if (closing) return
+        closing = true
+        Toast.makeText(this, "Closing session…", Toast.LENGTH_SHORT).show()
+        client?.stop()
+        Thread {
+            runCatching { env.prepareScripts() }   // ensure kill-session.sh is present
+            runCatching { env.killSession {} }
+            runOnUiThread {
+                runCatching { stopService(Intent(this, LinuxSessionService::class.java)) }
+                finish()
+            }
+        }.apply { isDaemon = true; start() }
     }
 
     override fun onDestroy() {
-        ui.removeCallbacksAndMessages(null)
         client?.stop()
         super.onDestroy()
     }

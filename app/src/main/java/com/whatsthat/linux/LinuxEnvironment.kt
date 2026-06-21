@@ -161,6 +161,18 @@ class LinuxEnvironment(context: Context) {
         desktopProcess = null
     }
 
+    /** End the running session: kill the VNC server inside the container (it
+     *  daemonizes, so destroying our launch process isn't enough), then drop
+     *  our handle. Safe to call when nothing is running. */
+    fun killSession(onLog: (String) -> Unit) {
+        runCatching {
+            if (rootfsReady(activeDistro)) {
+                execScript("kill-session.sh", insideContainer = true, onLog = onLog)
+            }
+        }
+        stopDesktop()
+    }
+
     /**
      * Run an arbitrary command inside the Ubuntu container and stream its
      * combined stdout+stderr to [onLog]. This backs the in-app console: error

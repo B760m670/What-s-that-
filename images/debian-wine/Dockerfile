@@ -37,6 +37,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=box64 /tmp/box64/build/box64 /usr/local/bin/box64
 RUN chmod +x /usr/local/bin/box64
 
+# x86_64 runtime libs that Box64 needs to load Wine's emulated .so files — e.g.
+# Wine's ntdll.so links libgcc_s.so.1, which must exist as x86_64 (the rootfs is
+# arm64). Enable amd64 multiarch and install the small runtime set.
+RUN dpkg --add-architecture amd64 \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libc6:amd64 libgcc-s1:amd64 libstdc++6:amd64 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # Wine (x86-64 build, executed via Box64 on the device).
 RUN mkdir -p /opt/wine \
     && wget -O /tmp/wine.tar.xz \
@@ -44,8 +53,9 @@ RUN mkdir -p /opt/wine \
     && tar -xf /tmp/wine.tar.xz -C /opt/wine --strip-components=1 \
     && rm -f /tmp/wine.tar.xz
 
-# `wine` / `wine64` wrappers that run the x86-64 Wine through Box64.
-RUN printf '#!/bin/sh\nexport WINEPREFIX="${WINEPREFIX:-/root/.wine}"\nexec box64 /opt/wine/bin/wine64 "$@"\n' \
+# `wine` / `wine64` wrappers that run the x86-64 Wine through Box64, with the
+# x86_64 lib dirs on Box64's search path.
+RUN printf '#!/bin/sh\nexport WINEPREFIX="${WINEPREFIX:-/root/.wine}"\nexport BOX64_LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu${BOX64_LD_LIBRARY_PATH:+:$BOX64_LD_LIBRARY_PATH}"\nexec box64 /opt/wine/bin/wine64 "$@"\n' \
         > /usr/local/bin/wine \
     && cp /usr/local/bin/wine /usr/local/bin/wine64 \
     && chmod +x /usr/local/bin/wine /usr/local/bin/wine64

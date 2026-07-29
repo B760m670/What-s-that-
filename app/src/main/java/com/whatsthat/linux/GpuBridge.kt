@@ -77,7 +77,10 @@ class GpuBridge(
                 .apply { isDaemon = true; name = "virgl-log"; start() }
 
             if (awaitSocket()) {
-                onLog("[gpu] virgl server ready — hardware rendering enabled")
+                // Deliberately not "hardware rendering enabled": all we know is
+                // that the socket exists. Whether GL actually works is decided
+                // in the guest, by start-desktop.sh's probe.
+                onLog("[gpu] virgl server up, socket ready — verifying GL in the container")
                 true
             } else {
                 onLog("[gpu] virgl server did not start — using software rendering")

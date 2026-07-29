@@ -14,13 +14,13 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 
 /**
- * Draws the VNC framebuffer scaled to fit, forwards touch as pointer events,
+ * Draws the desktop framebuffer scaled to fit, forwards touch as pointer events,
  * and feeds soft-keyboard / hardware-key input to the server as X keysyms.
  * Pure View + Canvas — no extra dependencies.
  */
-class VncCanvasView(context: Context) : View(context) {
+class DesktopCanvasView(context: Context) : View(context) {
 
-    var client: VncClient? = null
+    var input: InputSink? = null
 
     private var frame: Bitmap? = null
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
@@ -72,11 +72,11 @@ class VncCanvasView(context: Context) : View(context) {
                 requestFocus()
                 // Move the pointer to the spot first (buttons up), then press —
                 // some servers ignore a press that arrives without a prior move.
-                client?.sendPointer(0, fx, fy)
-                client?.sendPointer(1, fx, fy)
+                input?.sendPointer(0, fx, fy)
+                input?.sendPointer(1, fx, fy)
             }
-            MotionEvent.ACTION_MOVE -> client?.sendPointer(1, fx, fy)
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> client?.sendPointer(0, fx, fy)
+            MotionEvent.ACTION_MOVE -> input?.sendPointer(1, fx, fy)
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> input?.sendPointer(0, fx, fy)
         }
         return true
     }
@@ -90,12 +90,12 @@ class VncCanvasView(context: Context) : View(context) {
         val fx = ((event.x - dx) / scale).toInt().coerceIn(0, bmp.width - 1)
         val fy = ((event.y - dy) / scale).toInt().coerceIn(0, bmp.height - 1)
         when (event.actionMasked) {
-            MotionEvent.ACTION_HOVER_MOVE -> client?.sendPointer(0, fx, fy)
+            MotionEvent.ACTION_HOVER_MOVE -> input?.sendPointer(0, fx, fy)
             MotionEvent.ACTION_SCROLL -> {
                 val v = event.getAxisValue(MotionEvent.AXIS_VSCROLL)
                 val wheel = if (v > 0) 1 shl 3 else 1 shl 4   // RFB button 4 up / 5 down
-                client?.sendPointer(wheel, fx, fy)
-                client?.sendPointer(0, fx, fy)
+                input?.sendPointer(wheel, fx, fy)
+                input?.sendPointer(0, fx, fy)
             }
             else -> return false
         }
@@ -140,8 +140,8 @@ class VncCanvasView(context: Context) : View(context) {
     private fun typeChar(c: Char) = tapKeysym(c.code)  // Latin-1 maps 1:1 to keysyms
 
     private fun tapKeysym(sym: Int) {
-        client?.sendKey(sym, true)
-        client?.sendKey(sym, false)
+        input?.sendKey(sym, true)
+        input?.sendKey(sym, false)
     }
 
     private fun keysymFor(e: android.view.KeyEvent): Int = when (e.keyCode) {

@@ -14,14 +14,14 @@ import androidx.appcompat.app.AppCompatActivity
 
 /**
  * Full-screen host for the embedded VNC desktop. Connects to the loopback
- * display started by start-desktop.sh and renders it via [VncCanvasView].
+ * display started by start-desktop.sh and renders it via [DesktopCanvasView].
  * Floating buttons let the user pop the soft keyboard and close the session;
  * there's no status overlay so nothing covers the desktop.
  */
 class VncActivity : AppCompatActivity() {
 
     private var client: VncClient? = null
-    private lateinit var canvas: VncCanvasView
+    private lateinit var canvas: DesktopCanvasView
     private val env by lazy { LinuxEnvironment(this) }
     private val audio = AudioBridge()
     @Volatile private var closing = false
@@ -31,7 +31,7 @@ class VncActivity : AppCompatActivity() {
         val host = intent.getStringExtra(EXTRA_HOST) ?: "127.0.0.1"
         val port = intent.getIntExtra(EXTRA_PORT, 5901)
 
-        canvas = VncCanvasView(this)
+        canvas = DesktopCanvasView(this)
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             addView(canvas, FrameLayout.LayoutParams(-1, -1))
@@ -55,7 +55,7 @@ class VncActivity : AppCompatActivity() {
                 runOnUiThread { if (!closing) Toast.makeText(this, "VNC: $msg", Toast.LENGTH_LONG).show() }
             },
         ).also {
-            canvas.client = it
+            canvas.input = it
             it.start()
         }
         audio.start()   // play the desktop's sound through the phone speaker

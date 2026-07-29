@@ -107,7 +107,14 @@ much larger than that overhead.
       as a texture (the B,G,R,X byte order costs nothing to swizzle in a shader).
       - [x] Input half: `XTestInput`, an X11/XTEST client, since a framebuffer
             carries no input channel the way RFB does.
-      - [ ] Display half: mmap the framebuffer and render it.
+      - [x] Display half: `FramebufferReader` mmaps the Xvfb file; the read plus
+            BGRX→ARGB swizzle is ~1 ms per 720p frame.
+      - [x] Wiring: `start-desktop.sh` grows a `WT_DISPLAY_BACKEND=fb` branch
+            (Xvfb `-fbdir` + a separately-launched session), `FramebufferActivity`
+            polls the reader and drives input through the shared `InputSink`, and
+            a long-press on the launch button flips the backend. VNC stays the
+            default until this is confirmed on a device.
+      - [ ] On-device confirmation, then consider making it the default.
       - Note: Termux-X11 (Lorie) solves this with a zero-copy `AHardwareBuffer`
         and would be strictly better, but it is GPLv3 and this project is MIT,
         so embedding it would relicense the app.

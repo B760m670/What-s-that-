@@ -207,14 +207,54 @@ else
     echo "[gpu] software rendering (WT_GPU=${WT_GPU:-off})"
 fi
 
-echo "[desktop] Starting XFCE on :$DISPLAY_NUM (${GEOMETRY})..."
-# -localhost: only the on-device app can reach it. SecurityTypes None because
-# the socket never leaves localhost inside the app sandbox.
-vncserver ":$DISPLAY_NUM" \
-    -geometry "$GEOMETRY" \
-    -depth "$DEPTH" \
-    -localhost yes \
-    -SecurityTypes None
+if [ "${WT_DISPLAY_BACKEND:-vnc}" = "fb" ]; then
+    # Shared-framebuffer backend. Xvfb writes the screen to an mmap'd file the
+    # app reads directly; input goes to the X server over its socket via XTEST.
+    # None of RFB's per-frame encode/socket/decode is in the loop.
+    echo "[desktop] Starting XFCE on :$DISPLAY_NUM (${GEOMETRY}), framebuffer backend..."
+    FBDIR=/tmp/.wt-fb
 
-echo "[desktop] XFCE is running."
-echo "VNC_READY 127.0.0.1:$PORT"
+    # A stale Xvfb from a previous session still holds the display; the shared
+    # /proc lets us find and kill it (no procps needed), same as the VNC path.
+    for p in /proc/[0-9]*; do
+        grep -qa '/Xvfb' "$p/cmdline" 2>/dev/null && kill "${p#/proc/}" 2>/dev/null || true
+    done
+    rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}" 2>/dev/null || true
+    rm -rf "$FBDIR"; mkdir -p "$FBDIR"
+
+    # -ac: no access control — the socket lives only inside the app sandbox, the
+    # same trust boundary the VNC path assumes with SecurityTypes None.
+    Xvfb ":$DISPLAY_NUM" -screen 0 "${GEOMETRY}x${DEPTH}" -fbdir "$FBDIR" -ac \
+        >/tmp/.wt-xvfb.log 2>&1 &
+    i=0; while [ "$i" -lt 30 ]; do
+        [ -e "/tmp/.X11-unix/X${DISPLAY_NUM}" ] && break; i=$((i + 1)); sleep 0.5
+    done
+
+    # The session (XFCE etc.) is a separate process here — Xvfb is only the
+    # display server, unlike vncserver which runs xstartup itself.
+    DISPLAY=":$DISPLAY_NUM" dbus-launch --exit-with-session $SESSION_CMD \
+        >/tmp/.wt-session.log 2>&1 &
+
+    i=0; while [ "$i" -lt 30 ]; do
+        [ -f "$FBDIR/Xvfb_screen0" ] && break; i=$((i + 1)); sleep 0.5
+    done
+    if [ ! -f "$FBDIR/Xvfb_screen0" ]; then
+        echo "[desktop] framebuffer did not appear; check /tmp/.wt-xvfb.log" >&2
+        exit 1
+    fi
+    echo "[desktop] XFCE is running (framebuffer backend)."
+    # Guest paths; the app maps /tmp -> WT_HOME/tmp to reach them on the host.
+    echo "FB_READY $FBDIR/Xvfb_screen0 /tmp/.X11-unix/X${DISPLAY_NUM}"
+else
+    echo "[desktop] Starting XFCE on :$DISPLAY_NUM (${GEOMETRY})..."
+    # -localhost: only the on-device app can reach it. SecurityTypes None because
+    # the socket never leaves localhost inside the app sandbox.
+    vncserver ":$DISPLAY_NUM" \
+        -geometry "$GEOMETRY" \
+        -depth "$DEPTH" \
+        -localhost yes \
+        -SecurityTypes None
+
+    echo "[desktop] XFCE is running."
+    echo "VNC_READY 127.0.0.1:$PORT"
+fi

@@ -30,6 +30,8 @@ class MainActivity : AppCompatActivity() {
 
         refreshState()
         binding.actionButton.setOnClickListener { onAction() }
+        // Hidden, experimental: long-press flips VNC <-> framebuffer backend.
+        binding.actionButton.setOnLongClickListener { toggleBackend(); true }
         binding.distrosButton.setOnClickListener { startActivity(Intent(this, DistrosActivity::class.java)) }
         binding.runButton.setOnClickListener { runConsoleCommand() }
         binding.cmdInput.setOnEditorActionListener { _, _, _ -> runConsoleCommand(); true }
@@ -83,14 +85,14 @@ class MainActivity : AppCompatActivity() {
     private fun onAction() {
         setBusy(true)
         lifecycleScope.launch {
-            var endpoint: String? = null
+            var launch: DesktopLaunch? = null
             val result = withContext(Dispatchers.IO) {
                 when {
                     !env.isBootstrapped -> Step.BOOTSTRAP to env.bootstrap(::appendLog)
                     !env.isDesktopInstalled -> Step.DESKTOP to env.installDesktop(::appendLog)
                     else -> {
-                        endpoint = env.startDesktop("1280x720", ::appendLog)
-                        Step.LAUNCH to (if (endpoint != null) 0 else 1)
+                        launch = env.startDesktop("1280x720", ::appendLog)
+                        Step.LAUNCH to (if (launch != null) 0 else 1)
                     }
                 }
             }
@@ -98,22 +100,35 @@ class MainActivity : AppCompatActivity() {
             setBusy(false)
             refreshState()
             // Must launch the activity from the main thread (we're back on it here).
-            endpoint?.let { launchVncViewer(it) }
+            launch?.let { openDesktop(it) }
         }
     }
 
-    /** Open the desktop in the app's own embedded VNC viewer, and keep the
-     *  Linux session alive in the background while it's shown. */
-    private fun launchVncViewer(endpoint: String) {
-        val parts = endpoint.split(":")
-        val host = parts.getOrElse(0) { "127.0.0.1" }
-        val port = parts.getOrNull(1)?.toIntOrNull() ?: 5901
-        appendLog("Opening desktop viewer ($host:$port)…")
-        // A foreground-service failure must not block the viewer from opening.
+    /** Route to the viewer for whichever backend the session came up on. */
+    private fun openDesktop(launch: DesktopLaunch) {
         runCatching { ContextCompat.startForegroundService(this, Intent(this, LinuxSessionService::class.java)) }
             .onFailure { appendLog("(session service not started: ${it.message})") }
-        runCatching { VncActivity.start(this, host, port) }
-            .onFailure { appendLog("Could not open viewer: ${it.message}") }
+        when (launch) {
+            is DesktopLaunch.Vnc -> {
+                appendLog("Opening desktop viewer (${launch.host}:${launch.port})…")
+                runCatching { VncActivity.start(this, launch.host, launch.port) }
+                    .onFailure { appendLog("Could not open viewer: ${it.message}") }
+            }
+            is DesktopLaunch.Framebuffer -> {
+                appendLog("Opening desktop (framebuffer backend)…")
+                runCatching { FramebufferActivity.start(this, launch.fbPath, launch.xSocketPath) }
+                    .onFailure { appendLog("Could not open viewer: ${it.message}") }
+            }
+        }
+    }
+
+    /** Long-press the action button to flip the display backend (experimental). */
+    private fun toggleBackend() {
+        val next = if (env.displayBackend == "fb") "vnc" else "fb"
+        env.displayBackend = next
+        val label = if (next == "fb") "framebuffer (experimental)" else "VNC"
+        appendLog("Display backend set to: $label. Launch the desktop to use it.")
+        android.widget.Toast.makeText(this, "Backend: $label", android.widget.Toast.LENGTH_SHORT).show()
     }
 
     private fun setBusy(busy: Boolean) {

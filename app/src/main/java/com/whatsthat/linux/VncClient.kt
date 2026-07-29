@@ -23,7 +23,7 @@ class VncClient(
     private val onConnected: (width: Int, height: Int, bitmap: Bitmap) -> Unit,
     private val onFrame: () -> Unit,
     private val onError: (String) -> Unit,
-) {
+) : InputSink {
     @Volatile private var running = false
     private var socket: Socket? = null
     private lateinit var input: DataInputStream
@@ -297,7 +297,7 @@ class VncClient(
     // --- client input --------------------------------------------------------
 
     /** buttonMask bit0 = left, bit1 = middle, bit2 = right. Safe from any thread. */
-    fun sendPointer(buttonMask: Int, x: Int, y: Int) {
+    override fun sendPointer(buttonMask: Int, x: Int, y: Int) {
         if (!running) return
         val cx = x.coerceIn(0, (width - 1).coerceAtLeast(0))
         val cy = y.coerceIn(0, (height - 1).coerceAtLeast(0))
@@ -308,7 +308,7 @@ class VncClient(
         pointerSent++
     }
 
-    fun sendKey(keysym: Int, down: Boolean) {
+    override fun sendKey(keysym: Int, down: Boolean) {
         if (!running) return
         writeQueue.offer(byteArrayOf(
             4, (if (down) 1 else 0).toByte(), 0, 0,

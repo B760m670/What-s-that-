@@ -95,6 +95,25 @@ class FramebufferReader(private val file: File) {
         return true
     }
 
+    /**
+     * A cheap hash of a sparse sample of the current framebuffer, straight from
+     * the mapping. Reading every ~4000th byte is far cheaper than a full frame,
+     * so the poll loop can skip the swizzle and redraw when the screen has not
+     * changed. It can miss a change confined to fewer pixels than the stride,
+     * which for a desktop is not worth the cost of a full compare.
+     */
+    fun frameSignature(): Long {
+        val m = map ?: return 0
+        val end = pixelOffset + stride * height
+        var h = 1125899906842597L
+        var p = pixelOffset
+        while (p + 4 <= end) {
+            h = 31 * h + m.getInt(p)
+            p += SIGNATURE_STEP
+        }
+        return h
+    }
+
     fun close() {
         runCatching { raf?.close() }
         raf = null; map = null; bitmap = null; pixels = IntArray(0)
@@ -103,5 +122,6 @@ class FramebufferReader(private val file: File) {
     private companion object {
         const val XWD_HEADER_MIN = 100L
         const val XWD_COLOR_SIZE = 12   // one XWDColor entry
+        const val SIGNATURE_STEP = 4096 // sample every ~1000th pixel for the dirty-check
     }
 }

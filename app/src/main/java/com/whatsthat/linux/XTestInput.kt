@@ -26,7 +26,7 @@ import java.nio.ByteOrder
  * Not yet wired to the UI: this is the input half, the display half follows.
  * The protocol here was validated against a real X server before being written.
  */
-class XTestInput(private val socketPath: String) {
+class XTestInput(private val socketPath: String) : InputSink {
 
     private var socket: LocalSocket? = null
     private var input: InputStream? = null
@@ -216,40 +216,46 @@ class XTestInput(private val socketPath: String) {
         send(req)
     }
 
+    /** Count of keysyms dropped because this layout can't produce them. */
+    @Volatile var droppedKeys = 0; private set
+
     /** buttonMask bit0 = left, bit1 = middle, bit2 = right — matches VncClient. */
-    fun sendPointer(buttonMask: Int, x: Int, y: Int): Boolean = runCatching {
-        fakeInput(MOTION, 0, x, y)
-        for (b in 0..2) {
-            val down = (buttonMask shr b) and 1 == 1
-            val wasDown = (buttons shr b) and 1 == 1
-            if (down != wasDown) {
-                fakeInput(if (down) BUTTON_PRESS else BUTTON_RELEASE, b + 1, x, y)
+    override fun sendPointer(buttonMask: Int, x: Int, y: Int) {
+        runCatching {
+            fakeInput(MOTION, 0, x, y)
+            for (b in 0..2) {
+                val down = (buttonMask shr b) and 1 == 1
+                val wasDown = (buttons shr b) and 1 == 1
+                if (down != wasDown) {
+                    fakeInput(if (down) BUTTON_PRESS else BUTTON_RELEASE, b + 1, x, y)
+                }
             }
+            buttons = buttonMask
         }
-        buttons = buttonMask
-        true
-    }.getOrElse { false }
+    }
 
     private var buttons = 0
 
     /**
      * Send a keysym, adding Shift when the layout puts it in the shifted column.
-     * Returns false for a keysym this layout cannot produce, so the caller can
-     * report it rather than have keystrokes vanish silently.
+     * A keysym this layout cannot produce is counted (see [droppedKeys]) rather
+     * than vanishing silently.
      */
-    fun sendKey(keysym: Int, down: Boolean): Boolean = runCatching {
-        val m = keysymMap[keysym] ?: return false
-        val shift = keysymMap[XK_SHIFT_L]?.get(0) ?: 0
-        val needsShift = m[1] == 1 && shift != 0
-        if (down) {
-            if (needsShift) fakeInput(KEY_PRESS, shift, 0, 0)
-            fakeInput(KEY_PRESS, m[0], 0, 0)
-        } else {
-            fakeInput(KEY_RELEASE, m[0], 0, 0)
-            if (needsShift) fakeInput(KEY_RELEASE, shift, 0, 0)
+    override fun sendKey(keysym: Int, down: Boolean) {
+        val m = keysymMap[keysym]
+        if (m == null) { droppedKeys++; return }
+        runCatching {
+            val shift = keysymMap[XK_SHIFT_L]?.get(0) ?: 0
+            val needsShift = m[1] == 1 && shift != 0
+            if (down) {
+                if (needsShift) fakeInput(KEY_PRESS, shift, 0, 0)
+                fakeInput(KEY_PRESS, m[0], 0, 0)
+            } else {
+                fakeInput(KEY_RELEASE, m[0], 0, 0)
+                if (needsShift) fakeInput(KEY_RELEASE, shift, 0, 0)
+            }
         }
-        true
-    }.getOrElse { false }
+    }
 
     /** Round trip that flushes any pending async error to us. Also a liveness check. */
     fun pointerPosition(): IntArray? = runCatching {

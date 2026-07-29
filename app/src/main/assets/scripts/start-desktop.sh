@@ -207,6 +207,7 @@ else
     echo "[gpu] software rendering (WT_GPU=${WT_GPU:-off})"
 fi
 
+echo "[desktop] display backend: ${WT_DISPLAY_BACKEND:-vnc}"
 if [ "${WT_DISPLAY_BACKEND:-vnc}" = "fb" ]; then
     # Shared-framebuffer backend. Xvfb writes the screen to an mmap'd file the
     # app reads directly; input goes to the X server over its socket via XTEST.

@@ -80,6 +80,7 @@ exec "$PROOT" \
         WT_PROFILE="${WT_PROFILE:-full}" \
         WT_VARIANT="${WT_VARIANT:-standard}" \
         WT_GEOMETRY="${WT_GEOMETRY:-1280x720}" \
+        WT_DISPLAY_BACKEND="${WT_DISPLAY_BACKEND:-vnc}" \
         WT_GPU="${WT_GPU:-off}" \
         GALLIUM_DRIVER="$GALLIUM_DRIVER" \
         LIBGL_ALWAYS_SOFTWARE="$LIBGL_ALWAYS_SOFTWARE" \

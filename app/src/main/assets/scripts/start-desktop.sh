@@ -69,8 +69,7 @@ if command -v pulseaudio >/dev/null 2>&1; then
 allow-exit = no
 exit-idle-time = -1
 PA
-    if pulseaudio --start --system=false --exit-idle-time=-1 \
-        --disable-shm=true --daemonize=yes 2>/tmp/.wt-pa.log; then
+    if pulseaudio --start --exit-idle-time=-1 --disable-shm=true 2>/tmp/.wt-pa.log; then
         echo "[audio] PulseAudio started"
     else
         echo "[audio] PulseAudio failed to start; it said:"
@@ -272,14 +271,19 @@ if [ "${WT_DISPLAY_BACKEND:-vnc}" = "fb" ]; then
     # on PATH so its argv0 is "Xvfb" with no slash, and a bare grep pattern would
     # also match grep's own process. Escalate TERM then KILL so a wedged server
     # still goes down before we reclaim the display.
+    # Read cmdline with $(<file), which bash does WITHOUT forking, and match with
+    # a case builtin — so this scan spawns no processes. That matters here: it
+    # runs after heavy sessions, and if the process budget is already tight (the
+    # "fork: Function not implemented" failure), a scan that forks a `tr` per pid
+    # cannot even run. NULs collapse under $(<...), which is fine for a substring.
     for sig in TERM KILL; do
         for p in /proc/[0-9]*; do
-            cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null) || continue
+            [ -r "$p/cmdline" ] || continue
+            { cmd=$(<"$p/cmdline"); } 2>/dev/null   # group redirect hides the NUL-byte warning
             case "$cmd" in
                 *Xvfb*) kill -"$sig" "${p#/proc/}" 2>/dev/null || true ;;
             esac
         done
-        sleep 1
     done
     rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}" 2>/dev/null || true
     rm -rf "$FBDIR"; mkdir -p "$FBDIR"

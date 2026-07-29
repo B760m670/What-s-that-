@@ -10,15 +10,18 @@ export HOME=/root
 
 vncserver -kill ":$DISPLAY_NUM" >/dev/null 2>&1 || true
 
+# Read cmdline with $(<file) (bash reads it without forking) and match with a
+# case builtin, so reaping a heavy session does not itself need to spawn a `tr`
+# per process — which can fail once the process budget is exhausted.
 for sig in TERM KILL; do
     for p in /proc/[0-9]*; do
-        cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null) || continue
+        [ -r "$p/cmdline" ] || continue
+        { cmd=$(<"$p/cmdline"); } 2>/dev/null   # group redirect hides the NUL-byte warning
         case "$cmd" in
             *Xtigervnc*|*Xvnc*|*Xvfb*|*vncserver*|*xfce4-session*|*xfwm4*)
                 kill -"$sig" "${p#/proc/}" 2>/dev/null || true ;;
         esac
     done
-    sleep 1
 done
 
 rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}" 2>/dev/null || true

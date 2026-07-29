@@ -25,6 +25,7 @@ object Updater {
     private const val TAG = "latest-apk"
     private const val BASE = "https://github.com/$OWNER_REPO/releases/download/$TAG"
     private const val VERSION_URL = "$BASE/version.txt"
+    private const val EPOCH_URL = "$BASE/build-epoch.txt"
     private const val APK_URL = "$BASE/whats-that-linux.apk"
 
     /** The commit SHA of the latest published build, or null if unreachable. */
@@ -34,8 +35,36 @@ object Updater {
         }
     }.getOrNull()
 
+    /** Commit timestamp of the published build, or null if unreachable/absent. */
+    private fun latestEpoch(): Long? = runCatching {
+        openFollowingRedirects(EPOCH_URL).inputStream.bufferedReader().use {
+            it.readText().trim().toLongOrNull()
+        }
+    }.getOrNull()
+
+    /**
+     * Only true when the release is genuinely NEWER than us.
+     *
+     * This used to be `latest != GIT_SHA`, which cannot express "newer" — any
+     * difference read as an update. Since the release publishes from the default
+     * branch only, a build installed from a feature branch differs permanently,
+     * so the app would download the release, install it over the top, and land
+     * the user back on an older build every single launch.
+     *
+     * Commit timestamps are ordered, so they can answer the question SHAs
+     * cannot. If we know our own and can read the release's, compare them and
+     * nothing else — in particular, a release OLDER than us is not an update.
+     * If we cannot establish that ordering, decline rather than guess: a missed
+     * update costs one manual install, a wrong one undoes the user's.
+     */
     fun isUpdateAvailable(): Boolean {
         if (BuildConfig.GIT_SHA == "dev") return false      // local/dev build — don't nag
+        val remoteEpoch = latestEpoch()
+        if (BuildConfig.BUILD_EPOCH > 0L) {
+            return remoteEpoch != null && remoteEpoch > BuildConfig.BUILD_EPOCH
+        }
+        // Build predating BUILD_EPOCH: we have no ordering for ourselves, so
+        // fall back to the old "differs" test rather than never updating again.
         val latest = latestSha() ?: return false
         return !latest.equals(BuildConfig.GIT_SHA, ignoreCase = true)
     }

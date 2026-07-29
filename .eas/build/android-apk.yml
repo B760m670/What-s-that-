@@ -20,8 +20,9 @@ build:
         command: |
           chmod +x gradlew
           SHA="${EAS_BUILD_GIT_COMMIT_HASH:-$(git rev-parse HEAD 2>/dev/null || echo dev)}"
-          echo "Building from commit $SHA"
-          ./gradlew --no-daemon -PgitSha="$SHA" assembleFullDebug
+          EPOCH="$(git show -s --format=%ct HEAD 2>/dev/null || echo 0)"
+          echo "Building from commit $SHA (epoch $EPOCH)"
+          ./gradlew --no-daemon -PgitSha="$SHA" -PbuildEpoch="$EPOCH" assembleFullDebug
 
     - eas/upload_artifact:
         name: Upload application archive

@@ -44,13 +44,25 @@ jobs:
       - name: Build full debug APK
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon -PgitSha="${{ github.sha }}" assembleFullDebug
+          # Commit timestamp: the updater compares these to decide which of two
+          # builds is newer. A SHA cannot express that ordering.
+          BUILD_EPOCH="$(git show -s --format=%ct HEAD)"
+          echo "BUILD_EPOCH=$BUILD_EPOCH" >> "$GITHUB_ENV"
+          ./gradlew --no-daemon \
+            -PgitSha="${{ github.sha }}" \
+            -PbuildEpoch="$BUILD_EPOCH" \
+            assembleFullDebug
 
-      - name: Collect APK + version marker
+      - name: Collect APK + version markers
         run: |
           cp app/build/outputs/apk/full/debug/app-full-debug.apk whats-that-linux.apk
+          # version.txt stays a BARE SHA. Clients released before build-epoch.txt
+          # compare this file's whole contents against their own SHA, so adding
+          # anything here would make every one of them see a permanent mismatch
+          # and re-prompt for the same update on every launch.
           echo -n "${{ github.sha }}" > version.txt
-          ls -la whats-that-linux.apk
+          echo -n "$BUILD_EPOCH" > build-epoch.txt
+          ls -la whats-that-linux.apk version.txt build-epoch.txt
 
       - name: Upload APK as workflow artifact
         uses: actions/upload-artifact@v4
@@ -72,6 +84,7 @@ jobs:
           files: |
             whats-that-linux.apk
             version.txt
+            build-epoch.txt
           body: |
             Built on GitHub Actions from commit `${{ github.sha }}`.
             Install `whats-that-linux.apk`; the installed app self-updates from here.

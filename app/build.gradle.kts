@@ -22,6 +22,14 @@ android {
         val gitSha = (project.findProperty("gitSha") as String?)?.takeIf { it.isNotBlank() } ?: "dev"
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
 
+        // Commit timestamp (epoch seconds), passed by CI as -PbuildEpoch. The
+        // updater needs to know which of two builds is NEWER, and a SHA cannot
+        // answer that — comparing SHAs for inequality made the app "update"
+        // itself backwards onto whatever the release happened to hold. 0 means
+        // unknown (local build), which the updater treats as "do not guess".
+        val buildEpoch = (project.findProperty("buildEpoch") as String?)?.toLongOrNull() ?: 0L
+        buildConfigField("long", "BUILD_EPOCH", "${buildEpoch}L")
+
         // The Ubuntu rootfs is downloaded on first launch (keeps the APK light),
         // so the APK itself only carries the launcher + bootstrap scripts.
         ndk {

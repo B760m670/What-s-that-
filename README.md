@@ -64,8 +64,12 @@ compiles the APK on GitHub's runners (Android SDK preinstalled) — fast, no
 third-party queue or build limits — and publishes it for direct download:
 
 - **`latest-apk`** pre-release on the repo's Releases page →
-  `whats-that-linux.apk` (tap to install on your phone), or
-- the **Artifacts** of the Build APK run under the Actions tab.
+  `whats-that-linux.apk` (tap to install on your phone) — published from the
+  **default branch only**, since this is what installed apps self-update from;
+  or
+- the **Artifacts** of the Build APK run under the Actions tab — produced for
+  **every** branch, so feature-branch builds can be installed by hand without
+  being pushed to everyone.
 
 The APK is signed with the committed `app/debug.keystore`, so its signature is
 stable across builds: the in-app updater installs new versions **over the top**

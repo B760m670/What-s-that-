@@ -3,9 +3,12 @@ name: Build APK
 # Builds the installable APK directly on GitHub's runners (Android SDK
 # preinstalled) on every push — fast, no third-party queue or build limits.
 # Signed with the committed debug.keystore, so its signature matches every other
-# build and the in-app updater installs over the top. Publishes the APK +
-# version marker to the rolling `latest-apk` release for direct download and
-# self-update.
+# build and the in-app updater installs over the top.
+#
+# Every branch gets a downloadable workflow artifact, but only the default
+# branch publishes to the rolling `latest-apk` release: that release is what
+# every installed app self-updates from, so a push to a feature branch must not
+# be able to ship itself to users' phones.
 on:
   push:
   workflow_dispatch:
@@ -33,6 +36,11 @@ jobs:
           chmod +x tools/fetch-proot.sh
           ./tools/fetch-proot.sh
 
+      - name: Fetch virgl GPU server
+        run: |
+          chmod +x tools/fetch-virgl.sh
+          ./tools/fetch-virgl.sh
+
       - name: Build full debug APK
         run: |
           chmod +x gradlew
@@ -52,6 +60,10 @@ jobs:
           if-no-files-found: error
 
       - name: Publish APK to a rolling GitHub Release
+        # Default branch only — see the note at the top of this file. Compared
+        # against the repository's own default branch rather than a hardcoded
+        # name, so renaming the branch can't silently re-open the hole.
+        if: github.ref_name == github.event.repository.default_branch
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest-apk

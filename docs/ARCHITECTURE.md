@@ -40,8 +40,53 @@ also far lighter, matching the "lightweight but complete" goal.
 - **proot has CPU overhead** from ptrace syscall interception — heavy compiles
   are slower than native. Fine for desktop use, editors, browsing, scripting.
 - **Hardware access is limited** to what Android exposes to the sandbox (no raw
-  GPU/USB). XFCE runs on a virtual framebuffer via VNC, not the GPU.
+  USB). GPU access goes through virgl — see below — and falls back to CPU
+  rendering wherever that handshake fails.
 - **First run needs network** to fetch the rootfs and apt packages.
+
+## GPU acceleration (virgl)
+
+The container is glibc; the phone's GL driver is a bionic blob under
+`/vendor/lib*`. A glibc process can never `dlopen` it, so for a long time the
+desktop rendered entirely on the CPU via Mesa's `llvmpipe`. Note this is *not*
+a property of VNC or of X11 — swapping either for Wayland would not change it,
+because the missing piece is a loadable driver, not a display protocol.
+
+virgl splits the problem across the ABI boundary:
+
+```
+container (glibc)                        host (bionic, outside proot)
+  GL app
+    ↓
+  Mesa, GALLIUM_DRIVER=virpipe
+    ↓  serialised GL commands
+  /tmp/.virgl_test  ────────────────→  libvirglserver.so
+  (bound from $WT_HOME/tmp)              ↓
+                                       system EGL/GLES → real GPU
+```
+
+- The server (`virgl_test_server_android`, from Termux's
+  `virglrenderer-android`) is fetched by `tools/fetch-virgl.sh` and shipped as
+  a native lib, the same trick already used for `proot`. `GpuBridge` launches
+  and supervises it.
+- The socket lives in the host dir that `run-in-ubuntu.sh` already binds to the
+  guest's `/tmp`, so no extra plumbing is needed.
+- Portable across vendors: it uses whatever GLES driver the device has, so it
+  works on Mali as well as Adreno. (Turnip/Zink would be faster but is Adreno
+  only.)
+
+**Why there is a probe.** A live socket is not proof that GL works. If the
+guest's Mesa and the server disagree on the vtest protocol version, the
+connection is accepted and the client then *aborts* — Mesa does not fall back
+to software by itself, so every GL app on the desktop would crash rather than
+merely run slowly. `start-desktop.sh` therefore runs `glxinfo` against a
+throwaway display first and only keeps `virpipe` if a renderer actually comes
+back. This failure mode is not hypothetical: it was reproduced during
+development by pairing Mesa 25.2 with virglrenderer 1.0.
+
+proot's `ptrace` interception still adds latency to the socket traffic, so this
+does not reach native speed — but the gap between `llvmpipe` and a real GPU is
+much larger than that overhead.
 
 ## Roadmap
 
@@ -51,7 +96,11 @@ also far lighter, matching the "lightweight but complete" goal.
 - [ ] **Distro picker** — Debian / Alpine / Arch alongside Ubuntu.
 - [ ] **Persistent sessions** — reconnect to a running desktop after the app is
       backgrounded.
-- [ ] **Termux-X11 backend** as a faster alternative to VNC.
+- [x] **GPU passthrough via virgl** — hardware GL for the container, with an
+      automatic probe and a software fallback. Needs on-device confirmation.
+- [ ] **Termux-X11 backend** as a faster alternative to VNC. This is the other
+      half of the graphics work: virgl fixes *who renders*, a shared-buffer
+      transport fixes *how the pixels reach the screen*.
 - [ ] **Resolution / DPI controls** in the UI.
 
 ## Build environment note

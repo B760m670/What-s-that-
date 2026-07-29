@@ -125,14 +125,30 @@ gpu_probe_renderer() {
     # device run hit, and it told us nothing. glxgears calls XMapWindow before
     # drawing, so the drawable is viewable and the failure, if any, is real.
     #
-    # glxgears never exits on its own, so the timeout is the normal path and
-    # stdout must be line-buffered or the strings we want die unflushed in the
-    # pipe buffer when it is killed.
+    # glxgears never exits on its own, so waiting for it is waiting for the
+    # timeout — 12 seconds added to EVERY desktop launch, for a line it prints
+    # in well under one. Run it to a file and stop the moment the line lands
+    # (or it dies); the timeout becomes the worst case, not the normal one.
+    # stdout is forced line-buffered so the line reaches the file promptly and
+    # is not lost in the pipe buffer when the process is killed.
+    gears_out="/tmp/.wt-gpu-gears.$$"
+    : > "$gears_out"
     if command -v stdbuf >/dev/null 2>&1; then
-        probe_out="$(DISPLAY=":$PROBE_DISPLAY" timeout 12 stdbuf -oL -eL glxgears -info 2>&1 || true)"
+        DISPLAY=":$PROBE_DISPLAY" stdbuf -oL -eL glxgears -info > "$gears_out" 2>&1 &
     else
-        probe_out="$(DISPLAY=":$PROBE_DISPLAY" timeout 12 glxgears -info 2>&1 || true)"
+        DISPLAY=":$PROBE_DISPLAY" glxgears -info > "$gears_out" 2>&1 &
     fi
+    gears_pid=$!
+    i=0
+    while [ "$i" -lt 24 ]; do
+        grep -q '^GL_RENDERER' "$gears_out" 2>/dev/null && break
+        kill -0 "$gears_pid" 2>/dev/null || break   # it exited; whatever it said is final
+        i=$((i + 1)); sleep 0.5
+    done
+    kill "$gears_pid" 2>/dev/null || true
+    wait "$gears_pid" 2>/dev/null || true
+    probe_out="$(cat "$gears_out" 2>/dev/null || true)"
+    rm -f "$gears_out"
     renderer="$(printf '%s' "$probe_out" | sed -n 's/^GL_RENDERER *= *//p' | head -1)"
 
     # Fall back to glxinfo only if glxgears told us nothing at all — on a stack

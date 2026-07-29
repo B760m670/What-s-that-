@@ -215,6 +215,24 @@ if [ "${WT_DISPLAY_BACKEND:-vnc}" = "fb" ]; then
     echo "[desktop] Starting XFCE on :$DISPLAY_NUM (${GEOMETRY}), framebuffer backend..."
     FBDIR=/tmp/.wt-fb
 
+    # Xvfb is a separate package from tigervnc (Xvnc), so a container set up for
+    # the VNC backend does not have it. Install it once, the same top-up trick
+    # used for mesa-utils — otherwise the command below is simply not found.
+    if ! command -v Xvfb >/dev/null 2>&1; then
+        echo "[desktop] Xvfb not present — installing it once..."
+        export DEBIAN_FRONTEND=noninteractive
+        (apt-get update -y && apt-get install -y --no-install-recommends xvfb) \
+            >/tmp/.wt-xvfb-install.log 2>&1 || true
+    fi
+    if ! command -v Xvfb >/dev/null 2>&1; then
+        echo "[desktop] Xvfb could not be installed (no network?). Falling back to VNC." >&2
+        echo "[desktop] Run this in the app console, then relaunch:" >&2
+        echo "[desktop]   apt-get update && apt-get install -y xvfb" >&2
+        WT_DISPLAY_BACKEND=vnc
+    fi
+fi
+
+if [ "${WT_DISPLAY_BACKEND:-vnc}" = "fb" ]; then
     # A stale Xvfb from a previous session still holds the display; the shared
     # /proc lets us find and kill it (no procps needed), same as the VNC path.
     for p in /proc/[0-9]*; do
@@ -240,7 +258,8 @@ if [ "${WT_DISPLAY_BACKEND:-vnc}" = "fb" ]; then
         [ -f "$FBDIR/Xvfb_screen0" ] && break; i=$((i + 1)); sleep 0.5
     done
     if [ ! -f "$FBDIR/Xvfb_screen0" ]; then
-        echo "[desktop] framebuffer did not appear; check /tmp/.wt-xvfb.log" >&2
+        echo "[desktop] framebuffer did not appear. Xvfb said:" >&2
+        sed 's/^/[desktop]   /' /tmp/.wt-xvfb.log 2>/dev/null | head -8 >&2
         exit 1
     fi
     echo "[desktop] XFCE is running (framebuffer backend)."

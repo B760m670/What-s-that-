@@ -117,10 +117,13 @@ gpu_probe_renderer() {
         i=$((i + 1)); sleep 0.5
     done
     # A crashing client exits non-zero and prints nothing, which is exactly the
-    # signal we want; the timeout covers a server that hangs instead.
-    probe_out="$(DISPLAY=":$PROBE_DISPLAY" timeout 20 glxinfo -B 2>/dev/null || true)"
+    # signal we want; the timeout covers a server that hangs instead. Keep
+    # stderr: when this fails, the client's own error is the whole diagnosis,
+    # and discarding it costs a round trip with the user to learn nothing.
+    probe_out="$(DISPLAY=":$PROBE_DISPLAY" timeout 20 glxinfo -B 2>&1 || true)"
     kill "$probe_pid" 2>/dev/null || true
     rm -f "/tmp/.X${PROBE_DISPLAY}-lock" "/tmp/.X11-unix/X${PROBE_DISPLAY}" 2>/dev/null || true
+    printf '%s' "$probe_out" > /tmp/.wt-gpu-probe.log
     printf '%s' "$probe_out" | grep -i 'OpenGL renderer' | head -1
 }
 
@@ -148,11 +151,14 @@ if [ "${GALLIUM_DRIVER:-}" = "virpipe" ]; then
         echo "[gpu] ${PROBE#*: }"
         echo "[gpu] hardware rendering enabled"
     else
-        # GL really was attempted through virgl and did not come back. Report
-        # that, with the candidate causes, without picking one on no evidence.
+        # GL really was attempted through virgl and did not come back. Echo what
+        # the client actually said rather than guessing at a cause — the first
+        # time this fired, the guess sent us after the wrong thing entirely.
         echo "[gpu] GL did not come up through virgl — falling back to llvmpipe."
-        echo "[gpu] Likely: vtest protocol mismatch between this distro's Mesa"
-        echo "[gpu] and the bundled server, or the server has no GL on this device."
+        if [ -s /tmp/.wt-gpu-probe.log ]; then
+            echo "[gpu] client said:"
+            head -6 /tmp/.wt-gpu-probe.log | sed 's/^/[gpu]   /'
+        fi
         export GALLIUM_DRIVER=llvmpipe
         export LIBGL_ALWAYS_SOFTWARE=1
     fi

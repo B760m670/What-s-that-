@@ -52,10 +52,21 @@ class GpuBridge(
         socket.parentFile?.mkdirs()
 
         return runCatching {
+            // Defaults only, deliberately. --multi-clients looks like what a
+            // desktop wants, but it makes the server reject any client below
+            // vtest protocol 3:
+            //
+            //   if (renderer.multi_clients && version < 3)
+            //      return report_failed_call("protocol version too low", -EINVAL);
+            //
+            // Distro Mesa negotiates 2, so that flag rejects every real client —
+            // it is for clients that share resources and trust each other, not
+            // for "more than one client". The default (fork a child per
+            // connection, keep looping) already serves the desktop and every GL
+            // app it launches, and the parent stays in the foreground with no
+            // daemon()/setsid, so this Process handle still tracks it.
             val pb = ProcessBuilder(
                 serverBinary.absolutePath,
-                "--no-fork",        // stay in the foreground so we can supervise it
-                "--multi-clients",  // the desktop plus every GL app it launches
                 "--socket-path", socket.absolutePath,
             ).redirectErrorStream(true)
 

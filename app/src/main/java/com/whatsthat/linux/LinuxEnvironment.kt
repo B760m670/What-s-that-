@@ -4,6 +4,12 @@ import android.content.Context
 import android.os.Build
 import java.io.File
 
+/** How a started desktop can be reached, by backend. */
+sealed interface DesktopLaunch {
+    data class Vnc(val host: String, val port: Int) : DesktopLaunch
+    data class Framebuffer(val fbPath: String, val xSocketPath: String) : DesktopLaunch
+}
+
 /**
  * The engine. Owns the on-device layout of the embedded Linux and exposes the
  * three operations the UI needs: prepare assets, bootstrap Ubuntu, install the
@@ -128,14 +134,24 @@ class LinuxEnvironment(context: Context) {
             onLog = onLog,
         )
 
+    /** Which display backend the next launch uses. Default is the proven VNC. */
+    var displayBackend: String
+        get() = prefs.getString("display_backend", "vnc") ?: "vnc"
+        set(v) { prefs.edit().putString("display_backend", v).apply() }
+
     /**
-     * Start the XFCE/VNC session and return the loopback "host:port" to connect
-     * to, or null on failure. The VNC server is a long-lived process, so we must
-     * NOT wait for it to exit — we read its output only until it announces
-     * VNC_READY, then leave it running in the background (a daemon thread keeps
-     * draining its output so it never blocks on a full pipe).
+     * Start the XFCE session and return how to connect to it, or null on failure.
+     * The display server is long-lived, so we read the launcher's output only
+     * until it announces readiness, then leave it running (a daemon thread drains
+     * the rest so it never blocks on a full pipe).
+     *
+     * Two backends, chosen by [displayBackend]:
+     *   VNC — an RFB endpoint (host:port).
+     *   Framebuffer — the mmap'd Xvfb file plus the X socket for XTEST input.
+     * The script prints guest paths; we map the guest's /tmp to the host dir it
+     * is bound from so the app can reach them.
      */
-    fun startDesktop(geometry: String, onLog: (String) -> Unit): String? {
+    fun startDesktop(geometry: String, onLog: (String) -> Unit): DesktopLaunch? {
         stopDesktop()
         // Bring the GL server up first: Mesa in the container picks its driver
         // when the X session starts, so arriving late means a software session
@@ -146,29 +162,44 @@ class LinuxEnvironment(context: Context) {
         configureEnv(pb, mapOf(
             "WT_GEOMETRY" to geometry,
             "WT_GPU" to if (gpuReady) "virpipe" else "off",
+            "WT_DISPLAY_BACKEND" to displayBackend,
         ))
         val process = pb.start()
         desktopProcess = process
         val reader = process.inputStream.bufferedReader()
 
-        var endpoint: String? = null
+        var launch: DesktopLaunch? = null
         val deadline = System.currentTimeMillis() + 90_000
         while (System.currentTimeMillis() < deadline) {
             val line = reader.readLine() ?: break          // EOF = process exited early
             onLog(line)
-            val ep = line.substringAfter("VNC_READY ", "").trim()
-            if (ep.isNotEmpty()) { endpoint = ep; break }
+            line.substringAfter("VNC_READY ", "").trim().takeIf { it.isNotEmpty() }?.let {
+                val parts = it.split(":")
+                launch = DesktopLaunch.Vnc(parts.getOrElse(0) { "127.0.0.1" }, parts.getOrNull(1)?.toIntOrNull() ?: 5901)
+            }
+            line.substringAfter("FB_READY ", "").trim().takeIf { it.isNotEmpty() }?.let {
+                val parts = it.split(" ")
+                if (parts.size >= 2) {
+                    launch = DesktopLaunch.Framebuffer(guestToHost(parts[0]), guestToHost(parts[1]))
+                }
+            }
+            if (launch != null) break
         }
 
-        if (endpoint != null) {
+        if (launch != null) {
             // Keep the session alive; drain its remaining output off-thread.
             Thread { runCatching { reader.forEachLine(onLog) } }
                 .apply { isDaemon = true; start() }
         } else {
             stopDesktop()
         }
-        return endpoint
+        return launch
     }
+
+    /** Map a guest path under /tmp to the host dir bound there by run-in-ubuntu.sh. */
+    private fun guestToHost(guestPath: String): String =
+        if (guestPath.startsWith("/tmp/")) File(File(home, "tmp"), guestPath.removePrefix("/tmp/")).absolutePath
+        else guestPath
 
     /** Stop a running desktop/VNC session, if any. */
     fun stopDesktop() {

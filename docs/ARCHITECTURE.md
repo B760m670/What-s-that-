@@ -98,9 +98,26 @@ much larger than that overhead.
       backgrounded.
 - [x] **GPU passthrough via virgl** — hardware GL for the container, with an
       automatic probe and a software fallback. Needs on-device confirmation.
-- [ ] **Termux-X11 backend** as a faster alternative to VNC. This is the other
-      half of the graphics work: virgl fixes *who renders*, a shared-buffer
-      transport fixes *how the pixels reach the screen*.
+- [ ] **Shared-framebuffer backend** as a faster alternative to VNC — the other
+      half of the graphics work: virgl fixed *who renders*, this fixes *how the
+      pixels reach the screen*. Today a frame is rendered on the GPU, read back
+      to CPU memory, encoded by Xvnc, sent over a socket, decoded in Kotlin and
+      uploaded to the GPU again. The plan is `Xvfb -fbdir`, whose framebuffer is
+      an mmap-able file in the already-bound `/tmp`, read directly and uploaded
+      as a texture (the B,G,R,X byte order costs nothing to swizzle in a shader).
+      - [x] Input half: `XTestInput`, an X11/XTEST client, since a framebuffer
+            carries no input channel the way RFB does.
+      - [x] Display half: `FramebufferReader` mmaps the Xvfb file; the read plus
+            BGRX→ARGB swizzle is ~1 ms per 720p frame.
+      - [x] Wiring: `start-desktop.sh` grows a `WT_DISPLAY_BACKEND=fb` branch
+            (Xvfb `-fbdir` + a separately-launched session), `FramebufferActivity`
+            polls the reader and drives input through the shared `InputSink`, and
+            a long-press on the launch button flips the backend. VNC stays the
+            default until this is confirmed on a device.
+      - [ ] On-device confirmation, then consider making it the default.
+      - Note: Termux-X11 (Lorie) solves this with a zero-copy `AHardwareBuffer`
+        and would be strictly better, but it is GPLv3 and this project is MIT,
+        so embedding it would relicense the app.
 - [ ] **Resolution / DPI controls** in the UI.
 
 ## Build environment note

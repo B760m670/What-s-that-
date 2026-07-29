@@ -97,12 +97,14 @@ chmod +x /root/.vnc/xstartup
 # for want of a diagnostic tool. So top the packages up once, here, instead of
 # only in install-desktop.sh, which a Launch (as opposed to Install) never runs.
 gpu_ensure_packages() {
-    command -v glxinfo >/dev/null 2>&1 && return 0
+    # glxgears is the probe now, glxinfo only the fallback; both come from
+    # mesa-utils, so gate on the one we actually need first.
+    command -v glxgears >/dev/null 2>&1 && return 0
     echo "[gpu] GL packages missing in this container — installing them once..."
     export DEBIAN_FRONTEND=noninteractive
     (apt-get update -y && apt-get install -y --no-install-recommends \
         libgl1-mesa-dri libglx-mesa0 mesa-utils) >/dev/null 2>&1 || true
-    command -v glxinfo >/dev/null 2>&1
+    command -v glxgears >/dev/null 2>&1
 }
 
 PROBE_DISPLAY=99
@@ -116,15 +118,38 @@ gpu_probe_renderer() {
         [ -e "/tmp/.X11-unix/X${PROBE_DISPLAY}" ] && break
         i=$((i + 1)); sleep 0.5
     done
-    # A crashing client exits non-zero and prints nothing, which is exactly the
-    # signal we want; the timeout covers a server that hangs instead. Keep
-    # stderr: when this fails, the client's own error is the whole diagnosis,
-    # and discarding it costs a round trip with the user to learn nothing.
-    probe_out="$(DISPLAY=":$PROBE_DISPLAY" timeout 20 glxinfo -B 2>&1 || true)"
+    # Ask glxgears, not glxinfo. Under virgl the drawable is presented by
+    # reading it back with XGetImage, and XGetImage on a window that was never
+    # mapped fails with BadMatch. glxinfo never maps its window, so it reports
+    # BadMatch whether or not virgl works — which is exactly what the first
+    # device run hit, and it told us nothing. glxgears calls XMapWindow before
+    # drawing, so the drawable is viewable and the failure, if any, is real.
+    #
+    # glxgears never exits on its own, so the timeout is the normal path and
+    # stdout must be line-buffered or the strings we want die unflushed in the
+    # pipe buffer when it is killed.
+    if command -v stdbuf >/dev/null 2>&1; then
+        probe_out="$(DISPLAY=":$PROBE_DISPLAY" timeout 12 stdbuf -oL -eL glxgears -info 2>&1 || true)"
+    else
+        probe_out="$(DISPLAY=":$PROBE_DISPLAY" timeout 12 glxgears -info 2>&1 || true)"
+    fi
+    renderer="$(printf '%s' "$probe_out" | sed -n 's/^GL_RENDERER *= *//p' | head -1)"
+
+    # Fall back to glxinfo only if glxgears told us nothing at all — on a stack
+    # where the mapping issue does not bite, it still answers.
+    if [ -z "$renderer" ]; then
+        probe_alt="$(DISPLAY=":$PROBE_DISPLAY" timeout 15 glxinfo -B 2>&1 || true)"
+        renderer="$(printf '%s' "$probe_alt" | sed -n 's/^OpenGL renderer string: *//p' | head -1)"
+        probe_out="$probe_out
+--- glxinfo ---
+$probe_alt"
+    fi
+
     kill "$probe_pid" 2>/dev/null || true
     rm -f "/tmp/.X${PROBE_DISPLAY}-lock" "/tmp/.X11-unix/X${PROBE_DISPLAY}" 2>/dev/null || true
-    printf '%s' "$probe_out" > /tmp/.wt-gpu-probe.log
-    printf '%s' "$probe_out" | grep -i 'OpenGL renderer' | head -1
+    # GL_EXTENSIONS is a single enormous line; it would bury the diagnosis.
+    printf '%s' "$probe_out" | grep -v '^GL_EXTENSIONS' | cut -c1-200 > /tmp/.wt-gpu-probe.log
+    printf '%s' "$renderer"
 }
 
 if [ "${GALLIUM_DRIVER:-}" = "virpipe" ]; then
@@ -141,14 +166,14 @@ if [ "${GALLIUM_DRIVER:-}" = "virpipe" ]; then
         # Not the same as a failed probe: we learned nothing about whether virgl
         # works, we just had no way to ask. Claiming a cause here would be
         # asserting something we never established.
-        echo "[gpu] cannot verify GL — glxinfo unavailable and could not be"
+        echo "[gpu] cannot verify GL — mesa-utils unavailable and could not be"
         echo "[gpu] installed (no network?). Staying on software rendering."
         echo "[gpu] Fix: run this in the app console, then relaunch --"
         echo "[gpu]   apt-get update && apt-get install -y mesa-utils libgl1-mesa-dri"
         export GALLIUM_DRIVER=llvmpipe
         export LIBGL_ALWAYS_SOFTWARE=1
     elif [ -n "$PROBE" ]; then
-        echo "[gpu] ${PROBE#*: }"
+        echo "[gpu] renderer: $PROBE"
         echo "[gpu] hardware rendering enabled"
     else
         # GL really was attempted through virgl and did not come back. Echo what

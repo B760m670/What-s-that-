@@ -90,9 +90,23 @@ chmod +x /root/.vnc/xstartup
 # So prove it first, on a throwaway display so the real session never sees a
 # half-broken GL stack, and fall back deliberately if the probe does not come
 # back with a renderer.
+#
+# The probe needs glxinfo, which only arrives with mesa-utils. Containers whose
+# desktop was installed before GPU support existed do not have it — and treating
+# "no way to check" as "GL is broken" would disable virgl on every such install
+# for want of a diagnostic tool. So top the packages up once, here, instead of
+# only in install-desktop.sh, which a Launch (as opposed to Install) never runs.
+gpu_ensure_packages() {
+    command -v glxinfo >/dev/null 2>&1 && return 0
+    echo "[gpu] GL packages missing in this container — installing them once..."
+    export DEBIAN_FRONTEND=noninteractive
+    (apt-get update -y && apt-get install -y --no-install-recommends \
+        libgl1-mesa-dri libglx-mesa0 mesa-utils) >/dev/null 2>&1 || true
+    command -v glxinfo >/dev/null 2>&1
+}
+
 PROBE_DISPLAY=99
 gpu_probe_renderer() {
-    command -v glxinfo >/dev/null 2>&1 || return 1
     rm -f "/tmp/.X${PROBE_DISPLAY}-lock" "/tmp/.X11-unix/X${PROBE_DISPLAY}" 2>/dev/null || true
     Xvnc ":$PROBE_DISPLAY" -geometry 320x240 -depth 24 \
         -localhost yes -SecurityTypes None >/dev/null 2>&1 &
@@ -103,22 +117,48 @@ gpu_probe_renderer() {
         i=$((i + 1)); sleep 0.5
     done
     # A crashing client exits non-zero and prints nothing, which is exactly the
-    # signal we want; the timeout covers a server that hangs instead.
-    probe_out="$(DISPLAY=":$PROBE_DISPLAY" timeout 20 glxinfo -B 2>/dev/null || true)"
+    # signal we want; the timeout covers a server that hangs instead. Keep
+    # stderr: when this fails, the client's own error is the whole diagnosis,
+    # and discarding it costs a round trip with the user to learn nothing.
+    probe_out="$(DISPLAY=":$PROBE_DISPLAY" timeout 20 glxinfo -B 2>&1 || true)"
     kill "$probe_pid" 2>/dev/null || true
     rm -f "/tmp/.X${PROBE_DISPLAY}-lock" "/tmp/.X11-unix/X${PROBE_DISPLAY}" 2>/dev/null || true
+    printf '%s' "$probe_out" > /tmp/.wt-gpu-probe.log
     printf '%s' "$probe_out" | grep -i 'OpenGL renderer' | head -1
 }
 
 if [ "${GALLIUM_DRIVER:-}" = "virpipe" ]; then
     echo "[gpu] virgl socket present — probing GL before using it..."
-    PROBE="$(gpu_probe_renderer || true)"
-    if [ -n "$PROBE" ]; then
+    PROBE=""
+    if gpu_ensure_packages; then
+        CAN_CHECK=1
+        PROBE="$(gpu_probe_renderer || true)"
+    else
+        CAN_CHECK=0
+    fi
+
+    if [ "$CAN_CHECK" = 0 ]; then
+        # Not the same as a failed probe: we learned nothing about whether virgl
+        # works, we just had no way to ask. Claiming a cause here would be
+        # asserting something we never established.
+        echo "[gpu] cannot verify GL — glxinfo unavailable and could not be"
+        echo "[gpu] installed (no network?). Staying on software rendering."
+        echo "[gpu] Fix: run this in the app console, then relaunch --"
+        echo "[gpu]   apt-get update && apt-get install -y mesa-utils libgl1-mesa-dri"
+        export GALLIUM_DRIVER=llvmpipe
+        export LIBGL_ALWAYS_SOFTWARE=1
+    elif [ -n "$PROBE" ]; then
         echo "[gpu] ${PROBE#*: }"
         echo "[gpu] hardware rendering enabled"
     else
-        echo "[gpu] probe failed — the server and this distro's Mesa cannot talk."
-        echo "[gpu] falling back to software rendering (llvmpipe)."
+        # GL really was attempted through virgl and did not come back. Echo what
+        # the client actually said rather than guessing at a cause — the first
+        # time this fired, the guess sent us after the wrong thing entirely.
+        echo "[gpu] GL did not come up through virgl — falling back to llvmpipe."
+        if [ -s /tmp/.wt-gpu-probe.log ]; then
+            echo "[gpu] client said:"
+            head -6 /tmp/.wt-gpu-probe.log | sed 's/^/[gpu]   /'
+        fi
         export GALLIUM_DRIVER=llvmpipe
         export LIBGL_ALWAYS_SOFTWARE=1
     fi

@@ -233,10 +233,20 @@ if [ "${WT_DISPLAY_BACKEND:-vnc}" = "fb" ]; then
 fi
 
 if [ "${WT_DISPLAY_BACKEND:-vnc}" = "fb" ]; then
-    # A stale Xvfb from a previous session still holds the display; the shared
-    # /proc lets us find and kill it (no procps needed), same as the VNC path.
-    for p in /proc/[0-9]*; do
-        grep -qa '/Xvfb' "$p/cmdline" 2>/dev/null && kill "${p#/proc/}" 2>/dev/null || true
+    # A stale Xvfb from a previous session still holds the display, and the new
+    # one then fails with "server already running". Kill it via the shared /proc.
+    # Match on the cmdline read through tr+case, not `grep /Xvfb`: Xvfb is found
+    # on PATH so its argv0 is "Xvfb" with no slash, and a bare grep pattern would
+    # also match grep's own process. Escalate TERM then KILL so a wedged server
+    # still goes down before we reclaim the display.
+    for sig in TERM KILL; do
+        for p in /proc/[0-9]*; do
+            cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null) || continue
+            case "$cmd" in
+                *Xvfb*) kill -"$sig" "${p#/proc/}" 2>/dev/null || true ;;
+            esac
+        done
+        sleep 1
     done
     rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}" 2>/dev/null || true
     rm -rf "$FBDIR"; mkdir -p "$FBDIR"

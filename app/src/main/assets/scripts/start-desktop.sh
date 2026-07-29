@@ -78,6 +78,54 @@ exec dbus-launch --exit-with-session $SESSION_CMD
 EOF
 chmod +x /root/.vnc/xstartup
 
+# --- GPU probe ---------------------------------------------------------------
+#
+# A live socket is NOT proof that virgl works. If the container's Mesa and the
+# host-side server disagree on the vtest protocol version, the connection is
+# accepted and then the client *aborts* ("lost connection to rendering server",
+# SIGABRT) — Mesa does not fall back to software on its own. Committing the
+# session to virpipe on faith would therefore crash every GL app on the desktop
+# instead of merely making it slow.
+#
+# So prove it first, on a throwaway display so the real session never sees a
+# half-broken GL stack, and fall back deliberately if the probe does not come
+# back with a renderer.
+PROBE_DISPLAY=99
+gpu_probe_renderer() {
+    command -v glxinfo >/dev/null 2>&1 || return 1
+    rm -f "/tmp/.X${PROBE_DISPLAY}-lock" "/tmp/.X11-unix/X${PROBE_DISPLAY}" 2>/dev/null || true
+    Xvnc ":$PROBE_DISPLAY" -geometry 320x240 -depth 24 \
+        -localhost yes -SecurityTypes None >/dev/null 2>&1 &
+    probe_pid=$!
+    i=0
+    while [ "$i" -lt 20 ]; do
+        [ -e "/tmp/.X11-unix/X${PROBE_DISPLAY}" ] && break
+        i=$((i + 1)); sleep 0.5
+    done
+    # A crashing client exits non-zero and prints nothing, which is exactly the
+    # signal we want; the timeout covers a server that hangs instead.
+    probe_out="$(DISPLAY=":$PROBE_DISPLAY" timeout 20 glxinfo -B 2>/dev/null || true)"
+    kill "$probe_pid" 2>/dev/null || true
+    rm -f "/tmp/.X${PROBE_DISPLAY}-lock" "/tmp/.X11-unix/X${PROBE_DISPLAY}" 2>/dev/null || true
+    printf '%s' "$probe_out" | grep -i 'OpenGL renderer' | head -1
+}
+
+if [ "${GALLIUM_DRIVER:-}" = "virpipe" ]; then
+    echo "[gpu] virgl socket present — probing GL before using it..."
+    PROBE="$(gpu_probe_renderer || true)"
+    if [ -n "$PROBE" ]; then
+        echo "[gpu] ${PROBE#*: }"
+        echo "[gpu] hardware rendering enabled"
+    else
+        echo "[gpu] probe failed — the server and this distro's Mesa cannot talk."
+        echo "[gpu] falling back to software rendering (llvmpipe)."
+        export GALLIUM_DRIVER=llvmpipe
+        export LIBGL_ALWAYS_SOFTWARE=1
+    fi
+else
+    echo "[gpu] software rendering (WT_GPU=${WT_GPU:-off})"
+fi
+
 echo "[desktop] Starting XFCE on :$DISPLAY_NUM (${GEOMETRY})..."
 # -localhost: only the on-device app can reach it. SecurityTypes None because
 # the socket never leaves localhost inside the app sandbox.

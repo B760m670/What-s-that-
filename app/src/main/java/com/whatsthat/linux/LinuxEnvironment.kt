@@ -62,6 +62,9 @@ class LinuxEnvironment(context: Context) {
     private val prootBinary: File
         get() = File(nativeLibDir, "libproot.so")
 
+    /** Host-side GL server the container's Mesa forwards to. See [GpuBridge]. */
+    private val gpuBridge = GpuBridge(nativeLibDir = nativeLibDir, home = home)
+
     /** CPU arch in the naming the bootstrap script expects. */
     val arch: String = when (Build.SUPPORTED_ABIS.firstOrNull()) {
         "arm64-v8a" -> "aarch64"
@@ -134,8 +137,16 @@ class LinuxEnvironment(context: Context) {
      */
     fun startDesktop(geometry: String, onLog: (String) -> Unit): String? {
         stopDesktop()
+        // Bring the GL server up first: Mesa in the container picks its driver
+        // when the X session starts, so arriving late means a software session
+        // for the rest of its life. A failure here is not fatal — WT_GPU=off
+        // just leaves the guest on llvmpipe.
+        val gpuReady = gpuBridge.start(onLog)
         val pb = ProcessBuilder(containerCommand("start-desktop.sh")).redirectErrorStream(true)
-        configureEnv(pb, mapOf("WT_GEOMETRY" to geometry))
+        configureEnv(pb, mapOf(
+            "WT_GEOMETRY" to geometry,
+            "WT_GPU" to if (gpuReady) "virpipe" else "off",
+        ))
         val process = pb.start()
         desktopProcess = process
         val reader = process.inputStream.bufferedReader()
@@ -163,6 +174,9 @@ class LinuxEnvironment(context: Context) {
     fun stopDesktop() {
         desktopProcess?.let { runCatching { it.destroy() } }
         desktopProcess = null
+        // The GL server is only useful to a live session, and holding its socket
+        // open would block the next one from binding.
+        gpuBridge.stop()
     }
 
     /** End the running session: kill the VNC server inside the container (it

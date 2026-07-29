@@ -36,6 +36,11 @@ jobs:
           chmod +x tools/fetch-proot.sh
           ./tools/fetch-proot.sh
 
+      - name: Fetch virgl GPU server
+        run: |
+          chmod +x tools/fetch-virgl.sh
+          ./tools/fetch-virgl.sh
+
       - name: Build full debug APK
         run: |
           chmod +x gradlew

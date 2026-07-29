@@ -68,6 +68,18 @@ apt-get install -y --no-install-recommends \
     pulseaudio pulseaudio-utils \
     fonts-dejavu-core
 
+# Mesa's DRI drivers, including `virgl` — the client half of GPU acceleration.
+# It renders nothing itself: it serialises GL onto the socket held by the
+# host-side server (see GpuBridge.kt), which is the only process on the device
+# that can reach the vendor driver. Without this package the guest has no virgl
+# and silently stays on llvmpipe, so install it on its own and say so if it
+# fails. mesa-utils is what makes the difference checkable on-device:
+# `glxinfo -B` names the renderer, `glxgears` shows whether it moves.
+echo "[install] Installing Mesa (virgl GPU passthrough + GL diagnostics)..."
+apt-get install -y --no-install-recommends \
+    libgl1-mesa-dri libglx-mesa0 mesa-utils || \
+    echo "[install] Mesa install failed — desktop will be software-rendered."
+
 # Generate a UTF-8 locale so apps render correctly.
 locale-gen en_US.UTF-8 || true
 

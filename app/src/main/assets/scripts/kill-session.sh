@@ -14,7 +14,7 @@ for sig in TERM KILL; do
     for p in /proc/[0-9]*; do
         cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null) || continue
         case "$cmd" in
-            *Xtigervnc*|*Xvnc*|*vncserver*|*xfce4-session*|*xfwm4*)
+            *Xtigervnc*|*Xvnc*|*Xvfb*|*vncserver*|*xfce4-session*|*xfwm4*)
                 kill -"$sig" "${p#/proc/}" 2>/dev/null || true ;;
         esac
     done

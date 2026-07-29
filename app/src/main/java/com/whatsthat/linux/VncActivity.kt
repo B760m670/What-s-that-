@@ -47,7 +47,10 @@ class VncActivity : AppCompatActivity() {
             host = host,
             port = port,
             onConnected = { _, _, bmp -> runOnUiThread { canvas.setFrame(bmp) } },
-            onFrame = { runOnUiThread { canvas.invalidate() } },
+            // postInvalidateOnAnimation is already thread-safe, so this skips a
+            // Runnable allocation + Handler post per frame, and coalesces bursts
+            // of updates into a single redraw on the next vsync.
+            onFrame = { canvas.postInvalidateOnAnimation() },
             onError = { msg ->
                 runOnUiThread { if (!closing) Toast.makeText(this, "VNC: $msg", Toast.LENGTH_LONG).show() }
             },

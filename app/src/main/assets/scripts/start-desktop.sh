@@ -54,16 +54,48 @@ fi
 # Audio: the container can't reach the speaker directly. Run PulseAudio here,
 # route everything to a null sink, and stream that sink's PCM over loopback TCP
 # (s16le/48k/stereo) — the app's AudioBridge reads 127.0.0.1:4712 and plays it.
+#
+# This used to hide every step behind >/dev/null || true, so a silent desktop
+# gave no clue why. Now each step reports, the way the Xvfb and GPU paths do.
 if command -v pulseaudio >/dev/null 2>&1; then
     pulseaudio --kill >/dev/null 2>&1 || true
     sleep 1
-    pulseaudio --start --exit-idle-time=-1 --disable-shm=true >/dev/null 2>&1 || true
+
+    # PulseAudio refuses to run as root unless told to allow it, and under proot
+    # we are fake-root — the likeliest reason there has never been sound. Allow
+    # it explicitly via a daemon config, then start.
+    mkdir -p /root/.config/pulse
+    cat > /root/.config/pulse/daemon.conf <<'PA'
+allow-exit = no
+exit-idle-time = -1
+PA
+    if pulseaudio --start --exit-idle-time=-1 --disable-shm=true 2>/tmp/.wt-pa.log; then
+        echo "[audio] PulseAudio started"
+    else
+        echo "[audio] PulseAudio failed to start; it said:"
+        sed 's/^/[audio]   /' /tmp/.wt-pa.log 2>/dev/null | head -4
+    fi
     sleep 1
-    pactl load-module module-null-sink sink_name=wt \
-        sink_properties=device.description=WhatsThat >/dev/null 2>&1 || true
-    pactl set-default-sink wt >/dev/null 2>&1 || true
-    pactl load-module module-simple-protocol-tcp record=true source=wt.monitor \
-        listen=127.0.0.1 port=4712 format=s16le rate=48000 channels=2 >/dev/null 2>&1 || true
+
+    if pactl info >/dev/null 2>&1; then
+        pactl load-module module-null-sink sink_name=wt \
+            sink_properties=device.description=WhatsThat >/dev/null 2>&1 \
+            && echo "[audio] null sink 'wt' loaded" \
+            || echo "[audio] could not load null sink"
+        pactl set-default-sink wt >/dev/null 2>&1 || true
+        # Route anything already playing to our sink too, not just new streams.
+        for i in $(pactl list short sink-inputs 2>/dev/null | cut -f1); do
+            pactl move-sink-input "$i" wt >/dev/null 2>&1 || true
+        done
+        if pactl load-module module-simple-protocol-tcp record=true source=wt.monitor \
+            listen=127.0.0.1 port=4712 format=s16le rate=48000 channels=2 >/dev/null 2>&1; then
+            echo "[audio] streaming wt.monitor on 127.0.0.1:4712 — app should have sound"
+        else
+            echo "[audio] could not open the TCP audio stream on 4712"
+        fi
+    else
+        echo "[audio] PulseAudio is not answering; no sound this session"
+    fi
 fi
 
 mkdir -p /root/.vnc
@@ -239,14 +271,19 @@ if [ "${WT_DISPLAY_BACKEND:-vnc}" = "fb" ]; then
     # on PATH so its argv0 is "Xvfb" with no slash, and a bare grep pattern would
     # also match grep's own process. Escalate TERM then KILL so a wedged server
     # still goes down before we reclaim the display.
+    # Read cmdline with $(<file), which bash does WITHOUT forking, and match with
+    # a case builtin — so this scan spawns no processes. That matters here: it
+    # runs after heavy sessions, and if the process budget is already tight (the
+    # "fork: Function not implemented" failure), a scan that forks a `tr` per pid
+    # cannot even run. NULs collapse under $(<...), which is fine for a substring.
     for sig in TERM KILL; do
         for p in /proc/[0-9]*; do
-            cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null) || continue
+            [ -r "$p/cmdline" ] || continue
+            { cmd=$(<"$p/cmdline"); } 2>/dev/null   # group redirect hides the NUL-byte warning
             case "$cmd" in
                 *Xvfb*) kill -"$sig" "${p#/proc/}" 2>/dev/null || true ;;
             esac
         done
-        sleep 1
     done
     rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}" 2>/dev/null || true
     rm -rf "$FBDIR"; mkdir -p "$FBDIR"

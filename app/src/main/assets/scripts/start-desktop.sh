@@ -121,23 +121,33 @@ fi
 
 # "Desktop is running" only ever meant the X server came up. The session inside
 # it can still die — GNOME's "Oh no! Something has gone wrong" is exactly that,
-# and its reason goes to the session log, which the app never showed. So report
-# it: wait for the session to settle, then echo anything that looks fatal.
+# and its reason goes to the session log, which the app never showed.
 #
-# Backgrounded, because the launcher must return promptly with the READY line;
-# the app keeps draining our output afterwards, so late lines still arrive.
+# Runs in the FOREGROUND, after the READY line. The first version backgrounded
+# this and reported nothing at all: the script exits right after READY, proot
+# tears down the container's processes with it, and the delayed child was killed
+# before it could speak. The app only reads until READY and then drains the rest
+# on a thread, so staying alive a few seconds longer costs nothing — the viewer
+# has already opened — and the lines still arrive.
 session_health_report() {  # $1=log dir  $2=log filename suffix
-    local dir="$1" suffix="$2"
-    (
-        sleep 12
-        log=$(ls -t "$dir"/*"$suffix" 2>/dev/null | head -1)
-        [ -n "$log" ] || exit 0
-        hits=$(grep -aiE 'Oh no|has gone wrong|failed to (start|initialize|create|register)|could not|cannot open|no such file|segmentation|core dumped|not authorized|Fatal|GLX|EGL_|libGL error|assertion' \
-            "$log" 2>/dev/null | tail -10)
-        [ -n "$hits" ] || exit 0
+    dir="$1"; suffix="$2"
+    sleep 12
+    log=$(ls -t "$dir"/*"$suffix" 2>/dev/null | head -1)
+    if [ -z "$log" ]; then
+        echo "[session] no session log found in $dir"
+        return 0
+    fi
+    hits=$(grep -aiE 'Oh no|has gone wrong|failed to (start|initialize|create|register)|could not|cannot open|no such file|segmentation|core dumped|not authorized|Fatal|GLX|EGL_|libGL error|assertion|unrecoverable|Unable to' \
+        "$log" 2>/dev/null | tail -12)
+    if [ -n "$hits" ]; then
         echo "[session] the desktop session reported problems:"
         printf '%s\n' "$hits" | cut -c1-170 | sed 's/^/[session]   /'
-    ) &
+    else
+        # Say something regardless. A silent check is indistinguishable from a
+        # check that never ran, which is precisely how the last round was lost.
+        echo "[session] no obvious errors; last lines of the session log:"
+        tail -4 "$log" 2>/dev/null | cut -c1-170 | sed 's/^/[session]   /'
+    fi
 }
 
 mkdir -p /root/.vnc

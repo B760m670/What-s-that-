@@ -119,6 +119,27 @@ PA
     fi
 fi
 
+# "Desktop is running" only ever meant the X server came up. The session inside
+# it can still die — GNOME's "Oh no! Something has gone wrong" is exactly that,
+# and its reason goes to the session log, which the app never showed. So report
+# it: wait for the session to settle, then echo anything that looks fatal.
+#
+# Backgrounded, because the launcher must return promptly with the READY line;
+# the app keeps draining our output afterwards, so late lines still arrive.
+session_health_report() {  # $1=log dir  $2=log filename suffix
+    local dir="$1" suffix="$2"
+    (
+        sleep 12
+        log=$(ls -t "$dir"/*"$suffix" 2>/dev/null | head -1)
+        [ -n "$log" ] || exit 0
+        hits=$(grep -aiE 'Oh no|has gone wrong|failed to (start|initialize|create|register)|could not|cannot open|no such file|segmentation|core dumped|not authorized|Fatal|GLX|EGL_|libGL error|assertion' \
+            "$log" 2>/dev/null | tail -10)
+        [ -n "$hits" ] || exit 0
+        echo "[session] the desktop session reported problems:"
+        printf '%s\n' "$hits" | cut -c1-170 | sed 's/^/[session]   /'
+    ) &
+}
+
 mkdir -p /root/.vnc
 cat > /root/.vnc/xstartup <<EOF
 #!/bin/sh
@@ -266,7 +287,7 @@ if [ "${WT_DISPLAY_BACKEND:-vnc}" = "fb" ]; then
     # Shared-framebuffer backend. Xvfb writes the screen to an mmap'd file the
     # app reads directly; input goes to the X server over its socket via XTEST.
     # None of RFB's per-frame encode/socket/decode is in the loop.
-    echo "[desktop] Starting XFCE on :$DISPLAY_NUM (${GEOMETRY}), framebuffer backend..."
+    echo "[desktop] Starting ${WT_DE_NAME:-the desktop} on :$DISPLAY_NUM (${GEOMETRY}), framebuffer backend..."
     FBDIR=/tmp/.wt-fb
 
     # Xvfb is a separate package from tigervnc (Xvnc), so a container set up for
@@ -331,11 +352,12 @@ if [ "${WT_DISPLAY_BACKEND:-vnc}" = "fb" ]; then
         sed 's/^/[desktop]   /' /tmp/.wt-xvfb.log 2>/dev/null | head -8 >&2
         exit 1
     fi
-    echo "[desktop] XFCE is running (framebuffer backend)."
+    echo "[desktop] ${WT_DE_NAME:-Desktop} is running (framebuffer backend)."
     # Guest paths; the app maps /tmp -> WT_HOME/tmp to reach them on the host.
     echo "FB_READY $FBDIR/Xvfb_screen0 /tmp/.X11-unix/X${DISPLAY_NUM}"
+    session_health_report "/tmp" ".wt-session.log"
 else
-    echo "[desktop] Starting XFCE on :$DISPLAY_NUM (${GEOMETRY})..."
+    echo "[desktop] Starting ${WT_DE_NAME:-the desktop} on :$DISPLAY_NUM (${GEOMETRY})..."
     # -localhost: only the on-device app can reach it. SecurityTypes None because
     # the socket never leaves localhost inside the app sandbox.
     vncserver ":$DISPLAY_NUM" \
@@ -344,6 +366,7 @@ else
         -localhost yes \
         -SecurityTypes None
 
-    echo "[desktop] XFCE is running."
+    echo "[desktop] ${WT_DE_NAME:-Desktop} is running."
     echo "VNC_READY 127.0.0.1:$PORT"
+    session_health_report "/root/.vnc" ":${DISPLAY_NUM}.log"
 fi

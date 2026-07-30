@@ -16,6 +16,17 @@ on:
 permissions:
   contents: write   # to publish the rolling release
 
+# Merging and then syncing the working branch produces two pushes of the SAME
+# commit seconds apart. Both used to resolve the full dependency graph at once,
+# and Maven Central answered the second with 429 Too Many Requests, failing a
+# build of code that had just succeeded. Serialise per commit so they never
+# compete; cancel-in-progress stays false because the first of the pair is the
+# default-branch run that publishes the release, and cancelling it would drop
+# the update users are waiting for.
+concurrency:
+  group: build-apk-${{ github.sha }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,6 +38,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          # Cache the Gradle/Maven artifacts. Without this every run re-resolved
+          # the whole dependency graph from Maven Central, which is what earned
+          # the 429 in the first place; a warm cache means the repeat build of an
+          # already-built commit barely touches the network at all.
+          cache: gradle
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3

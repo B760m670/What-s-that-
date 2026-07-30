@@ -47,7 +47,7 @@ class MainActivity : AppCompatActivity() {
     /** On launch, see if CI published a newer APK; if so, fetch + offer to install. */
     private fun checkForUpdates() {
         lifecycleScope.launch {
-            val available = withContext(Dispatchers.IO) { Updater.isUpdateAvailable() }
+            val available = withContext(Dispatchers.IO) { Updater.isUpdateAvailable(::appendLog) }
             if (!available) return@launch
             appendLog("A new version is available.")
             val apk = withContext(Dispatchers.IO) { Updater.downloadApk(this@MainActivity, ::appendLog) }

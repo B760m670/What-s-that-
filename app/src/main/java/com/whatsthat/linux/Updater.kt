@@ -57,16 +57,38 @@ object Updater {
      * If we cannot establish that ordering, decline rather than guess: a missed
      * update costs one manual install, a wrong one undoes the user's.
      */
-    fun isUpdateAvailable(): Boolean {
-        if (BuildConfig.GIT_SHA == "dev") return false      // local/dev build — don't nag
+    fun isUpdateAvailable(onLog: (String) -> Unit = {}): Boolean {
+        if (BuildConfig.GIT_SHA == "dev") {
+            onLog("[update] local/dev build — update check skipped")
+            return false
+        }
         val remoteEpoch = latestEpoch()
+        val mine = BuildConfig.GIT_SHA.take(7)
         if (BuildConfig.BUILD_EPOCH > 0L) {
-            return remoteEpoch != null && remoteEpoch > BuildConfig.BUILD_EPOCH
+            if (remoteEpoch == null) {
+                // The whole check hinged on this silently: no epoch, no update,
+                // no word to the user about why. Say so, and don't leave them
+                // stuck — a differing SHA still means a new build exists.
+                onLog("[update] couldn't read the release's build time (offline?)")
+                val latest = latestSha()
+                return if (latest != null && !latest.equals(BuildConfig.GIT_SHA, ignoreCase = true)) {
+                    onLog("[update] but the published build differs ($mine -> ${latest.take(7)}) — offering it")
+                    true
+                } else false
+            }
+            val newer = remoteEpoch > BuildConfig.BUILD_EPOCH
+            onLog(
+                if (newer) "[update] newer build available (yours ${BuildConfig.BUILD_EPOCH}, release $remoteEpoch)"
+                else "[update] up to date (yours ${BuildConfig.BUILD_EPOCH} >= release $remoteEpoch)"
+            )
+            return newer
         }
         // Build predating BUILD_EPOCH: we have no ordering for ourselves, so
         // fall back to the old "differs" test rather than never updating again.
-        val latest = latestSha() ?: return false
-        return !latest.equals(BuildConfig.GIT_SHA, ignoreCase = true)
+        val latest = latestSha() ?: run { onLog("[update] release unreachable"); return false }
+        val differs = !latest.equals(BuildConfig.GIT_SHA, ignoreCase = true)
+        onLog(if (differs) "[update] new build $mine -> ${latest.take(7)}" else "[update] up to date ($mine)")
+        return differs
     }
 
     /** Download the APK into the FileProvider-shared dir. Returns the file or null. */

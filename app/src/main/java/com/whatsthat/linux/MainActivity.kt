@@ -75,7 +75,7 @@ class MainActivity : AppCompatActivity() {
     private fun refreshState() {
         binding.actionButton.text = when {
             !env.isBootstrapped -> getString(R.string.action_install_ubuntu, env.activeDistro.name)
-            !env.isDesktopInstalled -> getString(R.string.action_install_desktop)
+            !env.isDesktopInstalled -> getString(R.string.action_install_desktop, env.activeDesktopEnv.name)
             else -> getString(R.string.action_launch_desktop)
         }
         binding.statusText.text =

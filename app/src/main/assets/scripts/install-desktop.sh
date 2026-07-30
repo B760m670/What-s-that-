@@ -84,17 +84,25 @@ apt-get install -y --no-install-recommends \
 # Generate a UTF-8 locale so apps render correctly.
 locale-gen en_US.UTF-8 || true
 
+# Which desktop to install is chosen in the app, not baked in here: the same
+# rootfs can host any of them, and a second one can be added later without
+# disturbing the first. The app passes the package list and session binary so
+# this script does not have to keep its own copy of that table.
+DE_NAME="${WT_DE_NAME:-XFCE}"
+DE_PACKAGES="${WT_DE_PACKAGES:-xfce4 xfce4-terminal xfce4-goodies}"
+SESSION_CMD="${WT_DE_SESSION:-startxfce4}"
+
+echo "[install] Desktop environment: $DE_NAME (session: $SESSION_CMD)"
+echo "[install] Installing $DE_NAME..."
+if ! apt-get install -y --no-install-recommends $DE_PACKAGES; then
+    echo "[install] $DE_NAME failed to install. Falling back to XFCE."
+    DE_NAME="XFCE"; SESSION_CMD="startxfce4"
+    apt-get install -y --no-install-recommends xfce4 xfce4-terminal xfce4-goodies
+fi
+
 if [ "$PROFILE" = "lite" ]; then
-    echo "[install] Installing lite desktop (Openbox)..."
-    apt-get install -y --no-install-recommends \
-        openbox obconf tint2 \
-        xterm pcmanfm \
-        nano || echo "[install] Some lite extras failed — desktop still usable."
-    SESSION_CMD="openbox-session"
+    echo "[install] Lite profile — skipping the extra tool set."
 else
-    echo "[install] Installing XFCE desktop..."
-    apt-get install -y --no-install-recommends \
-        xfce4 xfce4-terminal xfce4-goodies
     echo "[install] Installing everyday tools (files, editor, dev)..."
     apt-get install -y --no-install-recommends \
         mousepad ristretto \
@@ -117,7 +125,6 @@ else
         fi
     done
     [ "$BROWSER_OK" = 1 ] || echo "[install] No browser available — add one later via the console."
-    SESSION_CMD="startxfce4"
 fi
 
 echo "[install] Cleaning apt caches to keep the install light..."
@@ -136,4 +143,4 @@ dbus-launch --exit-with-session $SESSION_CMD
 EOF
 chmod +x /root/.vnc/xstartup
 
-echo "[install] Desktop installed (profile: $PROFILE)."
+echo "[install] $DE_NAME installed (profile: $PROFILE, session: $SESSION_CMD)."

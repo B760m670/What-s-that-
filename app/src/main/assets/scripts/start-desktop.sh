@@ -44,12 +44,22 @@ if [ -n "${WT_DE_SESSION:-}" ] && command -v "$WT_DE_SESSION" >/dev/null 2>&1; t
 else
     [ -n "${WT_DE_SESSION:-}" ] && \
         echo "[desktop] $WT_DE_SESSION is not installed here — using another desktop."
-    for s in startxfce4 mate-session startlxqt startlxde openbox-session startplasma-x11; do
+    for s in startxfce4 mate-session startlxqt startlxde openbox-session startplasma-x11 gnome-session; do
         if command -v "$s" >/dev/null 2>&1; then SESSION_CMD="$s"; break; fi
     done
 fi
 [ -n "$SESSION_CMD" ] || SESSION_CMD="xterm"
 echo "[desktop] session: $SESSION_CMD"
+
+# GNOME must be told this is an X11 session. Left to itself it looks for
+# Wayland, finds none, and gives up — on a VNC/Xvfb display there is only ever
+# an X server. The variable is harmless for the other desktops.
+SESSION_LAUNCH="$SESSION_CMD"
+if [ "$SESSION_CMD" = "gnome-session" ]; then
+    SESSION_LAUNCH="gnome-session --session=gnome-xorg"
+    export XDG_SESSION_TYPE=x11
+    export GDK_BACKEND=x11
+fi
 
 # Openbox on its own shows only a bare background + cursor, and touch VNC has no
 # right-click to reach its menu. Autostart a panel and a terminal so there's an
@@ -117,7 +127,8 @@ unset DBUS_SESSION_BUS_ADDRESS
 export HOME=/root
 export XDG_RUNTIME_DIR=/tmp/runtime-root
 export XKL_XMODMAP_DISABLE=1
-exec dbus-launch --exit-with-session $SESSION_CMD
+export XDG_SESSION_TYPE=x11
+exec dbus-launch --exit-with-session $SESSION_LAUNCH
 EOF
 chmod +x /root/.vnc/xstartup
 
@@ -309,7 +320,7 @@ if [ "${WT_DISPLAY_BACKEND:-vnc}" = "fb" ]; then
 
     # The session (XFCE etc.) is a separate process here — Xvfb is only the
     # display server, unlike vncserver which runs xstartup itself.
-    DISPLAY=":$DISPLAY_NUM" dbus-launch --exit-with-session $SESSION_CMD \
+    DISPLAY=":$DISPLAY_NUM" dbus-launch --exit-with-session $SESSION_LAUNCH \
         >/tmp/.wt-session.log 2>&1 &
 
     i=0; while [ "$i" -lt 30 ]; do

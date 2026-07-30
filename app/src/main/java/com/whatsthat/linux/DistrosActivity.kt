@@ -113,10 +113,12 @@ class DistrosActivity : AppCompatActivity() {
             })
         }
 
-        // Say plainly why the desktop people ask for first is not on the list.
-        hint("GNOME is not offered: gnome-session needs systemd-logind for seat " +
-            "management, which cannot exist under proot, so it fails to start rather " +
-            "than merely running slowly.")
+        // Heavy options are labelled rather than removed: the device is the only
+        // real judge, and a wrong guess about what "cannot work" costs the user
+        // the choice entirely.
+        hint("Heavier desktops are marked, not hidden. If one fails to start, the " +
+            "launch log says so and you can switch back immediately — nothing you " +
+            "already installed is lost.")
     }
 
     private fun header(text: String, size: Float, bold: Boolean = false, topDp: Float = 0f) {

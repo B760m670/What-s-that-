@@ -38,10 +38,10 @@ object DesktopEnvs {
      * ordering is lightest-first, because on this stack that is the axis that
      * decides whether the desktop is pleasant.
      *
-     * GNOME is deliberately absent. gnome-session depends on systemd-logind for
-     * seat/session management, which cannot exist under proot — it does not
-     * merely run slowly, it fails to start. Offering it would be offering a
-     * button that cannot work, so the picker says so instead.
+     * The heavy entries are labelled, not hidden. Guessing that something
+     * "cannot work" and removing the option is worse than letting the device
+     * answer: the packages show logind is only a Recommends for GNOME, so the
+     * missing init is not the hard blocker it is often assumed to be.
      */
     val all: List<DesktopEnv> = listOf(
         DesktopEnv(
@@ -77,6 +77,23 @@ object DesktopEnvs {
             weight = DesktopEnv.Weight.HEAVY,
             note = "Large download and noticeably slow on a phone under proot. " +
                 "It does start, but expect to wait — pick a lighter one first.",
+        ),
+        // GNOME is the one people ask for, and it is genuinely the hardest here.
+        // It is offered rather than hidden: in Debian, logind is only a
+        // Recommends of gnome-session-bin, not a Depends, and libsystemd0 is
+        // just the client library — so the absence of systemd as PID 1 does not
+        // by itself rule it out. Whether it actually comes up on a given device
+        // is a question only that device can answer, so say so plainly.
+        DesktopEnv(
+            id = "gnome", name = "GNOME", sessionCmd = "gnome-session",
+            // Deliberately not gnome-core: that pulls gdm3, a display manager
+            // that cannot work without a real init. Just the session and shell.
+            packages = "gnome-session gnome-shell gnome-terminal",
+            weight = DesktopEnv.Weight.HEAVY,
+            note = "Experimental and the heaviest option — a large download, and " +
+                "GNOME Shell is a compositing desktop, so it leans hard on the GPU " +
+                "passthrough. It may fail to start on some devices; if it does, the " +
+                "log says so and you can switch back without reinstalling anything.",
         ),
     )
 

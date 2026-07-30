@@ -35,17 +35,36 @@ class LinuxEnvironment(context: Context) {
         get() = Distros.byId(prefs.getString("active_distro", "ubuntu") ?: "ubuntu")
         set(v) { prefs.edit().putString("active_distro", v.id).apply() }
 
+    /**
+     * Which desktop the active distro should install and launch. Independent of
+     * the distro: switching it makes [isDesktopInstalled] false until that
+     * desktop's packages are in the rootfs, so the main button offers to install
+     * it — and installing a second desktop leaves the first one in place.
+     */
+    val allDesktopEnvs: List<DesktopEnv> get() = DesktopEnvs.all
+    var activeDesktopEnv: DesktopEnv
+        get() = DesktopEnvs.byId(prefs.getString("active_de", DesktopEnvs.DEFAULT_ID) ?: DesktopEnvs.DEFAULT_ID)
+        set(v) { prefs.edit().putString("active_de", v.id).apply() }
+
     // Treat a distro as installed only if the rootfs is actually there — a
     // leftover .bootstrap-done marker with the files gone (a corrupted/half
     // removed install) must not be trusted, or proot fails with "/usr/bin/env
     // not found". Re-checking a real file makes the app reinstall cleanly.
     fun rootfsReady(d: Distro) =
         File(distroDir(d), ".bootstrap-done").exists() && File(distroDir(d), "usr/bin/env").exists()
-    // Desktop is ready if XFCE was installed on-device (Ubuntu/Debian) OR the
-    // distro is one of our pre-built images that bakes the marker (the Wine one).
-    fun desktopReady(d: Distro) =
-        File(distroDir(d), "usr/bin/startxfce4").exists() ||
+    /**
+     * Ready when the SELECTED desktop's session binary is present — not merely
+     * any desktop. That is what makes switching work: pick a different desktop
+     * and the main button offers to install it, without disturbing the one
+     * already there. Pre-built images (the Wine one) bake a marker instead.
+     */
+    fun desktopReady(d: Distro, de: DesktopEnv = activeDesktopEnv) =
+        File(distroDir(d), "usr/bin/${de.sessionCmd}").exists() ||
         File(distroDir(d), "root/.wt-desktop-ready").exists()
+
+    /** Desktops already installed in this rootfs, for showing state in the picker. */
+    fun installedDesktops(d: Distro): List<DesktopEnv> =
+        DesktopEnvs.all.filter { File(distroDir(d), "usr/bin/${it.sessionCmd}").exists() }
     fun removeDistro(d: Distro) { distroDir(d).deleteRecursively() }
 
     /** Move a v1 install (filesDir/ubuntu) into the per-distro layout, once. */
@@ -130,6 +149,10 @@ class LinuxEnvironment(context: Context) {
                 "WT_PROFILE" to BuildConfig.DESKTOP_PROFILE,
                 "WT_PKG" to activeDistro.pkg.name.lowercase(),
                 "WT_DISTRO" to activeDistro.id,
+                "WT_DE" to activeDesktopEnv.id,
+                "WT_DE_NAME" to activeDesktopEnv.name,
+                "WT_DE_PACKAGES" to activeDesktopEnv.packages,
+                "WT_DE_SESSION" to activeDesktopEnv.sessionCmd,
             ),
             onLog = onLog,
         )
@@ -163,6 +186,7 @@ class LinuxEnvironment(context: Context) {
             "WT_GEOMETRY" to geometry,
             "WT_GPU" to if (gpuReady) "virpipe" else "off",
             "WT_DISPLAY_BACKEND" to displayBackend,
+            "WT_DE_SESSION" to activeDesktopEnv.sessionCmd,
         ))
         val process = pb.start()
         desktopProcess = process

@@ -2,7 +2,9 @@
 <resources>
     <string name="app_name">What\'s that? — Linux</string>
     <string name="action_install_ubuntu">Install %1$s</string>
-    <string name="action_install_desktop">Install XFCE desktop</string>
+    <string name="action_install_desktop">Install %1$s desktop</string>
+    <string name="de_title">Desktop environment</string>
+    <string name="de_selected_not_installed">selected — not installed yet</string>
     <string name="action_launch_desktop">Launch desktop</string>
     <string name="action_distributions">Distributions…</string>
     <string name="distros_title">Distributions</string>

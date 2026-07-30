@@ -34,11 +34,22 @@ mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
 rm -f /root/.ICEauthority /root/.Xauthority 2>/dev/null || true
 
 # Regenerate xstartup every launch (so fixes apply without reinstalling the
-# desktop). Pick whatever session is installed.
-if command -v startxfce4 >/dev/null 2>&1; then SESSION_CMD="startxfce4"
-elif command -v openbox-session >/dev/null 2>&1; then SESSION_CMD="openbox-session"
-elif command -v startlxqt >/dev/null 2>&1; then SESSION_CMD="startlxqt"
-else SESSION_CMD="xterm"; fi
+# desktop). Honour the desktop chosen in the app, but only if it is actually
+# present — a rootfs can hold several, and the user may have switched to one
+# that has not been installed here yet. Falling back to whatever IS installed
+# beats starting nothing at all.
+SESSION_CMD=""
+if [ -n "${WT_DE_SESSION:-}" ] && command -v "$WT_DE_SESSION" >/dev/null 2>&1; then
+    SESSION_CMD="$WT_DE_SESSION"
+else
+    [ -n "${WT_DE_SESSION:-}" ] && \
+        echo "[desktop] $WT_DE_SESSION is not installed here — using another desktop."
+    for s in startxfce4 mate-session startlxqt startlxde openbox-session startplasma-x11; do
+        if command -v "$s" >/dev/null 2>&1; then SESSION_CMD="$s"; break; fi
+    done
+fi
+[ -n "$SESSION_CMD" ] || SESSION_CMD="xterm"
+echo "[desktop] session: $SESSION_CMD"
 
 # Openbox on its own shows only a bare background + cursor, and touch VNC has no
 # right-click to reach its menu. Autostart a panel and a terminal so there's an

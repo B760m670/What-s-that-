@@ -78,14 +78,14 @@ class DistrosActivity : AppCompatActivity() {
      * Desktop environments are a separate axis from distributions: the distro is
      * the rootfs you download, the desktop is packages installed inside it. So
      * they get their own section rather than extra rows in the list above —
-     * otherwise "Ubuntu XFCE" and "Ubuntu KDE" would each re-download the same
+     * otherwise "Ubuntu XFCE" and "Ubuntu GNOME" would each re-download the same
      * multi-gigabyte rootfs and you could never change your mind cheaply.
      */
     private fun desktopSection() {
         header(getString(R.string.de_title), 22f, bold = true, topDp = 32f)
         hint("Choose the desktop for “${env.activeDistro.name}”. Picking a new one lets the " +
             "main screen install it; anything already installed stays, so you can switch back " +
-            "without reinstalling. Lighter desktops are noticeably faster on a phone.")
+            "without reinstalling.")
 
         val activeDe = env.activeDesktopEnv.id
         val installedDes = env.installedDesktops(env.activeDistro).map { it.id }.toSet()
@@ -99,7 +99,7 @@ class DistrosActivity : AppCompatActivity() {
                 de.id in installedDes -> getString(R.string.distro_installed)
                 else -> getString(R.string.distro_not_installed)
             }
-            header("${de.name} · ${de.weight.label}  —  $status", 16f, bold = true, topDp = 18f)
+            header("${de.name}  —  $status", 16f, bold = true, topDp = 18f)
             de.note?.let { hint(it) }
 
             list.addView(Button(this).apply {
@@ -113,12 +113,8 @@ class DistrosActivity : AppCompatActivity() {
             })
         }
 
-        // Heavy options are labelled rather than removed: the device is the only
-        // real judge, and a wrong guess about what "cannot work" costs the user
-        // the choice entirely.
-        hint("Heavier desktops are marked, not hidden. If one fails to start, the " +
-            "launch log says so and you can switch back immediately — nothing you " +
-            "already installed is lost.")
+        hint("If a desktop fails to start, the launch log says why and you can switch " +
+            "back immediately — nothing you already installed is lost.")
 
         gpuSection()
     }

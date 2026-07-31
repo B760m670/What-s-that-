@@ -157,6 +157,16 @@ class LinuxEnvironment(context: Context) {
             onLog = onLog,
         )
 
+    /**
+     * Hardware GL via virgl. Default OFF: it is a rendering accelerator, not a
+     * display method, and on the hardware it has been tried it delivered no
+     * perceptible gain while adding failure modes. Kept switchable so the claim
+     * stays testable rather than assumed in either direction.
+     */
+    var gpuEnabled: Boolean
+        get() = prefs.getBoolean("gpu_enabled", false)
+        set(v) { prefs.edit().putBoolean("gpu_enabled", v).apply() }
+
     /** Which display backend the next launch uses. Default is the proven VNC. */
     var displayBackend: String
         get() = prefs.getString("display_backend", "vnc") ?: "vnc"
@@ -180,7 +190,16 @@ class LinuxEnvironment(context: Context) {
         // when the X session starts, so arriving late means a software session
         // for the rest of its life. A failure here is not fatal — WT_GPU=off
         // just leaves the guest on llvmpipe.
-        val gpuReady = gpuBridge.start(onLog)
+        // Off by default. virgl showed no measurable benefit on real hardware and
+        // does emit errors (vtest_send_fd -22, VTEST_CLIENT_ERROR_INPUT_READ), and
+        // a broken virgl makes GL clients abort rather than fall back to software.
+        // That is a plausible cause of a compositing desktop dying outright and of
+        // the occasional mid-session VNC drop, so it is no longer forced on
+        // everyone to buy a speed-up nobody could feel.
+        val gpuReady = if (gpuEnabled) gpuBridge.start(onLog) else {
+            onLog("[gpu] hardware GL disabled — software rendering (enable it in Distributions)")
+            false
+        }
         val pb = ProcessBuilder(containerCommand("start-desktop.sh")).redirectErrorStream(true)
         configureEnv(pb, mapOf(
             "WT_GEOMETRY" to geometry,

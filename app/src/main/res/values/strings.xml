@@ -5,6 +5,9 @@
     <string name="action_install_desktop">Install %1$s desktop</string>
     <string name="de_title">Desktop environment</string>
     <string name="gpu_title">Hardware GL (experimental)</string>
+    <string name="backend_title">Display backend</string>
+    <string name="backend_use_vnc">Switch to VNC</string>
+    <string name="backend_use_fb">Switch to framebuffer</string>
     <string name="gpu_enable">Turn on</string>
     <string name="gpu_disable">Turn off</string>
     <string name="de_selected_not_installed">selected — not installed yet</string>

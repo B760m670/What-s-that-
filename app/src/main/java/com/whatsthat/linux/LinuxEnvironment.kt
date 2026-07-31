@@ -4,12 +4,6 @@ import android.content.Context
 import android.os.Build
 import java.io.File
 
-/** How a started desktop can be reached, by backend. */
-sealed interface DesktopLaunch {
-    data class Vnc(val host: String, val port: Int) : DesktopLaunch
-    data class Framebuffer(val fbPath: String, val xSocketPath: String) : DesktopLaunch
-}
-
 /**
  * The engine. Owns the on-device layout of the embedded Linux and exposes the
  * three operations the UI needs: prepare assets, bootstrap Ubuntu, install the
@@ -35,36 +29,17 @@ class LinuxEnvironment(context: Context) {
         get() = Distros.byId(prefs.getString("active_distro", "ubuntu") ?: "ubuntu")
         set(v) { prefs.edit().putString("active_distro", v.id).apply() }
 
-    /**
-     * Which desktop the active distro should install and launch. Independent of
-     * the distro: switching it makes [isDesktopInstalled] false until that
-     * desktop's packages are in the rootfs, so the main button offers to install
-     * it — and installing a second desktop leaves the first one in place.
-     */
-    val allDesktopEnvs: List<DesktopEnv> get() = DesktopEnvs.all
-    var activeDesktopEnv: DesktopEnv
-        get() = DesktopEnvs.byId(prefs.getString("active_de", DesktopEnvs.DEFAULT_ID) ?: DesktopEnvs.DEFAULT_ID)
-        set(v) { prefs.edit().putString("active_de", v.id).apply() }
-
     // Treat a distro as installed only if the rootfs is actually there — a
     // leftover .bootstrap-done marker with the files gone (a corrupted/half
     // removed install) must not be trusted, or proot fails with "/usr/bin/env
     // not found". Re-checking a real file makes the app reinstall cleanly.
     fun rootfsReady(d: Distro) =
         File(distroDir(d), ".bootstrap-done").exists() && File(distroDir(d), "usr/bin/env").exists()
-    /**
-     * Ready when the SELECTED desktop's session binary is present — not merely
-     * any desktop. That is what makes switching work: pick a different desktop
-     * and the main button offers to install it, without disturbing the one
-     * already there. Pre-built images (the Wine one) bake a marker instead.
-     */
-    fun desktopReady(d: Distro, de: DesktopEnv = activeDesktopEnv) =
-        File(distroDir(d), "usr/bin/${de.sessionCmd}").exists() ||
+    // Desktop is ready if XFCE was installed on-device (Ubuntu/Debian) OR the
+    // distro is one of our pre-built images that bakes the marker (the Wine one).
+    fun desktopReady(d: Distro) =
+        File(distroDir(d), "usr/bin/startxfce4").exists() ||
         File(distroDir(d), "root/.wt-desktop-ready").exists()
-
-    /** Desktops already installed in this rootfs, for showing state in the picker. */
-    fun installedDesktops(d: Distro): List<DesktopEnv> =
-        DesktopEnvs.all.filter { File(distroDir(d), "usr/bin/${it.sessionCmd}").exists() }
     fun removeDistro(d: Distro) { distroDir(d).deleteRecursively() }
 
     /** Move a v1 install (filesDir/ubuntu) into the per-distro layout, once. */
@@ -86,9 +61,6 @@ class LinuxEnvironment(context: Context) {
     /** proot is shipped as a native lib so Android marks it executable on install. */
     private val prootBinary: File
         get() = File(nativeLibDir, "libproot.so")
-
-    /** Host-side GL server the container's Mesa forwards to. See [GpuBridge]. */
-    private val gpuBridge = GpuBridge(nativeLibDir = nativeLibDir, home = home)
 
     /** CPU arch in the naming the bootstrap script expects. */
     val arch: String = when (Build.SUPPORTED_ABIS.firstOrNull()) {
@@ -149,108 +121,48 @@ class LinuxEnvironment(context: Context) {
                 "WT_PROFILE" to BuildConfig.DESKTOP_PROFILE,
                 "WT_PKG" to activeDistro.pkg.name.lowercase(),
                 "WT_DISTRO" to activeDistro.id,
-                "WT_DE" to activeDesktopEnv.id,
-                "WT_DE_NAME" to activeDesktopEnv.name,
-                "WT_DE_PACKAGES" to activeDesktopEnv.packages,
-                "WT_DE_SESSION" to activeDesktopEnv.sessionCmd,
             ),
             onLog = onLog,
         )
 
     /**
-     * Hardware GL via virgl. Default OFF: it is a rendering accelerator, not a
-     * display method, and on the hardware it has been tried it delivered no
-     * perceptible gain while adding failure modes. Kept switchable so the claim
-     * stays testable rather than assumed in either direction.
+     * Start the XFCE/VNC session and return the loopback "host:port" to connect
+     * to, or null on failure. The VNC server is a long-lived process, so we must
+     * NOT wait for it to exit — we read its output only until it announces
+     * VNC_READY, then leave it running in the background (a daemon thread keeps
+     * draining its output so it never blocks on a full pipe).
      */
-    var gpuEnabled: Boolean
-        get() = prefs.getBoolean("gpu_enabled", false)
-        set(v) { prefs.edit().putBoolean("gpu_enabled", v).apply() }
-
-    /** Which display backend the next launch uses. Default is the proven VNC. */
-    var displayBackend: String
-        get() = prefs.getString("display_backend", "vnc") ?: "vnc"
-        set(v) { prefs.edit().putString("display_backend", v).apply() }
-
-    /**
-     * Start the XFCE session and return how to connect to it, or null on failure.
-     * The display server is long-lived, so we read the launcher's output only
-     * until it announces readiness, then leave it running (a daemon thread drains
-     * the rest so it never blocks on a full pipe).
-     *
-     * Two backends, chosen by [displayBackend]:
-     *   VNC — an RFB endpoint (host:port).
-     *   Framebuffer — the mmap'd Xvfb file plus the X socket for XTEST input.
-     * The script prints guest paths; we map the guest's /tmp to the host dir it
-     * is bound from so the app can reach them.
-     */
-    fun startDesktop(geometry: String, onLog: (String) -> Unit): DesktopLaunch? {
+    fun startDesktop(geometry: String, onLog: (String) -> Unit): String? {
         stopDesktop()
-        // Bring the GL server up first: Mesa in the container picks its driver
-        // when the X session starts, so arriving late means a software session
-        // for the rest of its life. A failure here is not fatal — WT_GPU=off
-        // just leaves the guest on llvmpipe.
-        // Off by default. virgl showed no measurable benefit on real hardware and
-        // does emit errors (vtest_send_fd -22, VTEST_CLIENT_ERROR_INPUT_READ), and
-        // a broken virgl makes GL clients abort rather than fall back to software.
-        // That is a plausible cause of a compositing desktop dying outright and of
-        // the occasional mid-session VNC drop, so it is no longer forced on
-        // everyone to buy a speed-up nobody could feel.
-        val gpuReady = if (gpuEnabled) gpuBridge.start(onLog) else {
-            onLog("[gpu] hardware GL disabled — software rendering (enable it in Distributions)")
-            false
-        }
         val pb = ProcessBuilder(containerCommand("start-desktop.sh")).redirectErrorStream(true)
-        configureEnv(pb, mapOf(
-            "WT_GEOMETRY" to geometry,
-            "WT_GPU" to if (gpuReady) "virpipe" else "off",
-            "WT_DISPLAY_BACKEND" to displayBackend,
-            "WT_DE_SESSION" to activeDesktopEnv.sessionCmd,
-        ))
+        configureEnv(pb, mapOf("WT_GEOMETRY" to geometry))
         val process = pb.start()
         desktopProcess = process
         val reader = process.inputStream.bufferedReader()
 
-        var launch: DesktopLaunch? = null
+        var endpoint: String? = null
         val deadline = System.currentTimeMillis() + 90_000
         while (System.currentTimeMillis() < deadline) {
             val line = reader.readLine() ?: break          // EOF = process exited early
             onLog(line)
-            line.substringAfter("VNC_READY ", "").trim().takeIf { it.isNotEmpty() }?.let {
-                val parts = it.split(":")
-                launch = DesktopLaunch.Vnc(parts.getOrElse(0) { "127.0.0.1" }, parts.getOrNull(1)?.toIntOrNull() ?: 5901)
-            }
-            line.substringAfter("FB_READY ", "").trim().takeIf { it.isNotEmpty() }?.let {
-                val parts = it.split(" ")
-                if (parts.size >= 2) {
-                    launch = DesktopLaunch.Framebuffer(guestToHost(parts[0]), guestToHost(parts[1]))
-                }
-            }
-            if (launch != null) break
+            val ep = line.substringAfter("VNC_READY ", "").trim()
+            if (ep.isNotEmpty()) { endpoint = ep; break }
         }
 
-        if (launch != null) {
+        if (endpoint != null) {
             // Keep the session alive; drain its remaining output off-thread.
             Thread { runCatching { reader.forEachLine(onLog) } }
                 .apply { isDaemon = true; start() }
         } else {
             stopDesktop()
         }
-        return launch
+        return endpoint
     }
-
-    /** Map a guest path under /tmp to the host dir bound there by run-in-ubuntu.sh. */
-    private fun guestToHost(guestPath: String): String =
-        if (guestPath.startsWith("/tmp/")) File(File(home, "tmp"), guestPath.removePrefix("/tmp/")).absolutePath
-        else guestPath
 
     /** Stop a running desktop/VNC session, if any. */
     fun stopDesktop() {
         desktopProcess?.let { runCatching { it.destroy() } }
         desktopProcess = null
-        // The GL server is only useful to a live session, and holding its socket
-        // open would block the next one from binding.
-        gpuBridge.stop()
     }
 
     /** End the running session: kill the VNC server inside the container (it

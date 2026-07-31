@@ -14,14 +14,14 @@ import androidx.appcompat.app.AppCompatActivity
 
 /**
  * Full-screen host for the embedded VNC desktop. Connects to the loopback
- * display started by start-desktop.sh and renders it via [DesktopCanvasView].
+ * display started by start-desktop.sh and renders it via [VncCanvasView].
  * Floating buttons let the user pop the soft keyboard and close the session;
  * there's no status overlay so nothing covers the desktop.
  */
 class VncActivity : AppCompatActivity() {
 
     private var client: VncClient? = null
-    private lateinit var canvas: DesktopCanvasView
+    private lateinit var canvas: VncCanvasView
     private val env by lazy { LinuxEnvironment(this) }
     private val audio = AudioBridge()
     @Volatile private var closing = false
@@ -31,7 +31,7 @@ class VncActivity : AppCompatActivity() {
         val host = intent.getStringExtra(EXTRA_HOST) ?: "127.0.0.1"
         val port = intent.getIntExtra(EXTRA_PORT, 5901)
 
-        canvas = DesktopCanvasView(this)
+        canvas = VncCanvasView(this)
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             addView(canvas, FrameLayout.LayoutParams(-1, -1))
@@ -47,15 +47,12 @@ class VncActivity : AppCompatActivity() {
             host = host,
             port = port,
             onConnected = { _, _, bmp -> runOnUiThread { canvas.setFrame(bmp) } },
-            // postInvalidateOnAnimation is already thread-safe, so this skips a
-            // Runnable allocation + Handler post per frame, and coalesces bursts
-            // of updates into a single redraw on the next vsync.
-            onFrame = { canvas.postInvalidateOnAnimation() },
+            onFrame = { runOnUiThread { canvas.invalidate() } },
             onError = { msg ->
                 runOnUiThread { if (!closing) Toast.makeText(this, "VNC: $msg", Toast.LENGTH_LONG).show() }
             },
         ).also {
-            canvas.input = it
+            canvas.client = it
             it.start()
         }
         audio.start()   // play the desktop's sound through the phone speaker

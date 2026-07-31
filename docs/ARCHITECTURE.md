@@ -40,53 +40,8 @@ also far lighter, matching the "lightweight but complete" goal.
 - **proot has CPU overhead** from ptrace syscall interception — heavy compiles
   are slower than native. Fine for desktop use, editors, browsing, scripting.
 - **Hardware access is limited** to what Android exposes to the sandbox (no raw
-  USB). GPU access goes through virgl — see below — and falls back to CPU
-  rendering wherever that handshake fails.
+  GPU/USB). XFCE runs on a virtual framebuffer via VNC, not the GPU.
 - **First run needs network** to fetch the rootfs and apt packages.
-
-## GPU acceleration (virgl)
-
-The container is glibc; the phone's GL driver is a bionic blob under
-`/vendor/lib*`. A glibc process can never `dlopen` it, so for a long time the
-desktop rendered entirely on the CPU via Mesa's `llvmpipe`. Note this is *not*
-a property of VNC or of X11 — swapping either for Wayland would not change it,
-because the missing piece is a loadable driver, not a display protocol.
-
-virgl splits the problem across the ABI boundary:
-
-```
-container (glibc)                        host (bionic, outside proot)
-  GL app
-    ↓
-  Mesa, GALLIUM_DRIVER=virpipe
-    ↓  serialised GL commands
-  /tmp/.virgl_test  ────────────────→  libvirglserver.so
-  (bound from $WT_HOME/tmp)              ↓
-                                       system EGL/GLES → real GPU
-```
-
-- The server (`virgl_test_server_android`, from Termux's
-  `virglrenderer-android`) is fetched by `tools/fetch-virgl.sh` and shipped as
-  a native lib, the same trick already used for `proot`. `GpuBridge` launches
-  and supervises it.
-- The socket lives in the host dir that `run-in-ubuntu.sh` already binds to the
-  guest's `/tmp`, so no extra plumbing is needed.
-- Portable across vendors: it uses whatever GLES driver the device has, so it
-  works on Mali as well as Adreno. (Turnip/Zink would be faster but is Adreno
-  only.)
-
-**Why there is a probe.** A live socket is not proof that GL works. If the
-guest's Mesa and the server disagree on the vtest protocol version, the
-connection is accepted and the client then *aborts* — Mesa does not fall back
-to software by itself, so every GL app on the desktop would crash rather than
-merely run slowly. `start-desktop.sh` therefore runs `glxinfo` against a
-throwaway display first and only keeps `virpipe` if a renderer actually comes
-back. This failure mode is not hypothetical: it was reproduced during
-development by pairing Mesa 25.2 with virglrenderer 1.0.
-
-proot's `ptrace` interception still adds latency to the socket traffic, so this
-does not reach native speed — but the gap between `llvmpipe` and a real GPU is
-much larger than that overhead.
 
 ## Roadmap
 
@@ -96,28 +51,7 @@ much larger than that overhead.
 - [ ] **Distro picker** — Debian / Alpine / Arch alongside Ubuntu.
 - [ ] **Persistent sessions** — reconnect to a running desktop after the app is
       backgrounded.
-- [x] **GPU passthrough via virgl** — hardware GL for the container, with an
-      automatic probe and a software fallback. Needs on-device confirmation.
-- [ ] **Shared-framebuffer backend** as a faster alternative to VNC — the other
-      half of the graphics work: virgl fixed *who renders*, this fixes *how the
-      pixels reach the screen*. Today a frame is rendered on the GPU, read back
-      to CPU memory, encoded by Xvnc, sent over a socket, decoded in Kotlin and
-      uploaded to the GPU again. The plan is `Xvfb -fbdir`, whose framebuffer is
-      an mmap-able file in the already-bound `/tmp`, read directly and uploaded
-      as a texture (the B,G,R,X byte order costs nothing to swizzle in a shader).
-      - [x] Input half: `XTestInput`, an X11/XTEST client, since a framebuffer
-            carries no input channel the way RFB does.
-      - [x] Display half: `FramebufferReader` mmaps the Xvfb file; the read plus
-            BGRX→ARGB swizzle is ~1 ms per 720p frame.
-      - [x] Wiring: `start-desktop.sh` grows a `WT_DISPLAY_BACKEND=fb` branch
-            (Xvfb `-fbdir` + a separately-launched session), `FramebufferActivity`
-            polls the reader and drives input through the shared `InputSink`, and
-            a long-press on the launch button flips the backend. VNC stays the
-            default until this is confirmed on a device.
-      - [ ] On-device confirmation, then consider making it the default.
-      - Note: Termux-X11 (Lorie) solves this with a zero-copy `AHardwareBuffer`
-        and would be strictly better, but it is GPLv3 and this project is MIT,
-        so embedding it would relicense the app.
+- [ ] **Termux-X11 backend** as a faster alternative to VNC.
 - [ ] **Resolution / DPI controls** in the UI.
 
 ## Build environment note

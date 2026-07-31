@@ -6,12 +6,39 @@
     <string name="action_launch_desktop">Launch desktop</string>
     <string name="action_distributions">Distributions…</string>
     <string name="distros_title">Distributions</string>
+    <string name="distros_hint">Each system installs separately and keeps its own files. Switching only changes which one the main screen installs and launches — nothing already installed is removed.</string>
     <string name="distro_active">active</string>
     <string name="distro_installed">installed</string>
     <string name="distro_not_installed">not installed</string>
     <string name="distro_use">Use</string>
     <string name="distro_remove">Remove</string>
+
+    <string name="chip_active">Active</string>
+    <string name="chip_not_installed">Not installed</string>
+    <string name="chip_desktop_ready">Desktop ready</string>
+    <string name="chip_no_desktop">No desktop yet</string>
+    <string name="chip_experimental">Experimental</string>
+    <string name="chip_measuring">Measuring…</string>
+
+    <string name="remove_title">Remove %1$s?</string>
+    <string name="remove_message">This deletes the whole system — about %1$s — including every program and file inside it. It cannot be undone; reinstalling means downloading it again.</string>
+    <string name="storage_summary">Installed systems use %1$s · %2$s free on this device</string>
     <string name="status_arch">%1$s · %2$s · build %3$s</string>
+    <string name="subtitle_build">%1$s · build %2$s</string>
+    <string name="action_resume">Return to the running desktop</string>
+    <string name="action_resolution">Resolution</string>
+    <string name="chip_session_running">Session running</string>
+    <string name="console_show">Show</string>
+    <string name="console_hide">Hide</string>
+    <string name="progress_working">Working…</string>
+
+    <string name="resolution_title">Desktop resolution</string>
+
+    <string name="err_title">That didn\'t work</string>
+    <string name="err_bootstrap">The system could not be downloaded or unpacked. This usually means the network dropped, or the device ran out of space.</string>
+    <string name="err_desktop">The desktop could not be installed. The package downloads may have failed part-way.</string>
+    <string name="err_launch">The desktop did not start. The log has the reason.</string>
+    <string name="err_show_log">Show log</string>
     <string name="notif_running">Linux session is running</string>
     <string name="hint_no_vnc_viewer">Desktop is up at %1$s — install a VNC viewer to connect.</string>
     <string name="console_title">Logs &amp; command console</string>

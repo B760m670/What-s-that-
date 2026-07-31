@@ -1,92 +1,144 @@
 package com.whatsthat.linux
 
-import android.graphics.Color
+import android.content.res.ColorStateList
 import android.os.Bundle
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.chip.Chip
+import com.whatsthat.linux.databinding.ActivityDistrosBinding
+import com.whatsthat.linux.databinding.ItemDistroBinding
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
- * Lists the available distributions and lets the user pick which one is active,
- * install new ones, or remove them — all side-by-side, so installing/removing
- * one never touches another (each has its own rootfs dir).
+ * Lists the available distributions as cards: each carries its own mark and
+ * accent, the chips say what state it is in, and the footprint is shown because
+ * these are multi-gigabyte installs and the old screen never mentioned it.
  *
- * Selecting a distro just makes it active and returns to the main screen, whose
- * single button then installs (if needed) or launches that distro.
+ * Selecting a distro makes it active and returns; the main screen then installs
+ * or launches it. Installing or removing one never touches another — each has
+ * its own rootfs directory.
  */
 class DistrosActivity : AppCompatActivity() {
 
+    private lateinit var binding: ActivityDistrosBinding
     private lateinit var env: LinuxEnvironment
-    private lateinit var list: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        binding = ActivityDistrosBinding.inflate(layoutInflater)
+        setContentView(binding.root)
         env = LinuxEnvironment(this)
-        val dp = resources.displayMetrics.density
-        val pad = (16 * dp).toInt()
 
-        list = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, pad)
-        }
-        setContentView(ScrollView(this).apply { addView(list) })
+        binding.toolbar.setNavigationIcon(android.R.drawable.ic_menu_close_clear_cancel)
+        binding.toolbar.setNavigationOnClickListener { finish() }
         rebuild()
     }
 
     private fun rebuild() {
-        list.removeAllViews()
+        binding.distroList.removeAllViews()
+        for (d in env.allDistros) addCard(d)
+        updateStorageSummary()
+    }
 
-        header(getString(R.string.distros_title), 22f, bold = true)
-        hint("Pick a distribution and tap “Use”. The current one stays installed — " +
-            "switching only changes which one the main screen installs and launches.")
+    private fun addCard(d: Distro) {
+        val row = ItemDistroBinding.inflate(layoutInflater, binding.distroList, true)
+        val accent = ContextCompat.getColor(this, d.accentRes)
+        val installed = env.rootfsReady(d)
+        val isActive = d.id == env.activeDistro.id
 
-        val activeId = env.activeDistro.id
-        for (d in env.allDistros) {
-            val installed = env.rootfsReady(d)
-            val isActive = d.id == activeId
-            val status = when {
-                isActive -> getString(R.string.distro_active)
-                installed -> getString(R.string.distro_installed)
-                else -> getString(R.string.distro_not_installed)
+        row.distroIcon.setImageResource(d.iconRes)
+        row.distroIcon.imageTintList = ColorStateList.valueOf(accent)
+        row.distroName.text = d.name
+        row.distroTagline.text = d.tagline
+
+        // The active card is outlined in its own accent so it stands out without
+        // an extra label competing with the chips.
+        row.card.strokeColor = if (isActive) accent else color(R.color.card_outline)
+        row.card.strokeWidth = if (isActive) 3 else 1
+
+        row.chips.removeAllViews()
+        if (isActive) row.chips.addView(chip(getString(R.string.chip_active), accent))
+        when {
+            !installed -> row.chips.addView(chip(getString(R.string.chip_not_installed), color(R.color.state_absent)))
+            env.desktopReady(d) -> row.chips.addView(chip(getString(R.string.chip_desktop_ready), color(R.color.state_ready)))
+            else -> row.chips.addView(chip(getString(R.string.chip_no_desktop), color(R.color.state_partial)))
+        }
+        if (d.experimental) row.chips.addView(chip(getString(R.string.chip_experimental), color(R.color.state_partial)))
+        // Size is filled in asynchronously: walking a populated rootfs is tens of
+        // thousands of files and would visibly stall the screen if done here.
+        if (installed) {
+            val sizeChip = chip(getString(R.string.chip_measuring), color(R.color.state_absent))
+            row.chips.addView(sizeChip)
+            lifecycleScope.launch {
+                val bytes = withContext(Dispatchers.IO) { env.diskUsage(d) }
+                sizeChip.text = LinuxEnvironment.formatBytes(bytes)
             }
-            header("${d.name}  —  $status", 16f, bold = true, topDp = 20f)
+        }
 
-            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            row.addView(Button(this).apply {
+        row.actions.removeAllViews()
+        if (!isActive) {
+            row.actions.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
                 text = getString(R.string.distro_use)
-                isEnabled = !isActive
-                setOnClickListener {
-                    env.activeDistro = d
-                    finish()   // main screen will offer Install/Launch for it
-                }
+                setOnClickListener { env.activeDistro = d; finish() }
             })
-            if (installed && !isActive) {
-                row.addView(Button(this).apply {
-                    text = getString(R.string.distro_remove)
-                    setOnClickListener { env.removeDistro(d); rebuild() }
-                })
-            }
-            list.addView(row)
+        }
+        if (installed && !isActive) {
+            row.actions.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+                text = getString(R.string.distro_remove)
+                setTextColor(color(R.color.state_partial))
+                setOnClickListener { confirmRemove(d) }
+            })
         }
     }
 
-    private fun header(text: String, size: Float, bold: Boolean = false, topDp: Float = 0f) {
-        list.addView(TextView(this).apply {
-            this.text = text
-            textSize = size
-            if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setPadding(0, (topDp * resources.displayMetrics.density).toInt(), 0, 0)
-        })
+    /**
+     * Removing a distro deletes gigabytes and everything installed inside it.
+     * It used to happen on a single tap with no warning and no way back.
+     */
+    private fun confirmRemove(d: Distro) {
+        lifecycleScope.launch {
+            val size = withContext(Dispatchers.IO) { env.diskUsage(d) }
+            AlertDialog.Builder(this@DistrosActivity)
+                .setTitle(getString(R.string.remove_title, d.name))
+                .setMessage(getString(R.string.remove_message, LinuxEnvironment.formatBytes(size)))
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.distro_remove) { _, _ ->
+                    lifecycleScope.launch {
+                        withContext(Dispatchers.IO) { env.removeDistro(d) }
+                        rebuild()
+                    }
+                }
+                .show()
+        }
     }
 
-    private fun hint(text: String) {
-        list.addView(TextView(this).apply {
-            this.text = text
-            textSize = 12f
-            setTextColor(Color.GRAY)
-            setPadding(0, (4 * resources.displayMetrics.density).toInt(), 0, (8 * resources.displayMetrics.density).toInt())
-        })
+    private fun updateStorageSummary() {
+        lifecycleScope.launch {
+            val (used, free) = withContext(Dispatchers.IO) { env.totalDiskUsage() to env.freeSpace() }
+            binding.storageSummary.text = getString(
+                R.string.storage_summary,
+                LinuxEnvironment.formatBytes(used),
+                LinuxEnvironment.formatBytes(free),
+            )
+        }
+    }
+
+    private fun color(res: Int) = ContextCompat.getColor(this, res)
+
+    private fun chip(label: String, tint: Int) = Chip(this).apply {
+        text = label
+        isClickable = false
+        isCheckable = false
+        chipStrokeWidth = 1f
+        chipStrokeColor = ColorStateList.valueOf(tint)
+        setTextColor(tint)
+        chipBackgroundColor = ColorStateList.valueOf(tint and 0x18FFFFFF)
+        chipMinHeight = 30f * resources.displayMetrics.density
+        textSize = 12f
     }
 }

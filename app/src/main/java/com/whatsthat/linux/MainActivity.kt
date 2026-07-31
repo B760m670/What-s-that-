@@ -1,24 +1,36 @@
 package com.whatsthat.linux
 
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.os.Bundle
+import android.view.View
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.chip.Chip
 import com.whatsthat.linux.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Single-screen driver: a big action button, a live log, and a progress bar.
- * The button's job changes with state — Install Ubuntu → Install Desktop →
- * Launch Desktop — so the user always has exactly one obvious next step.
+ * The one screen that answers "what have I got, and what happens if I press
+ * this". It shows the active system, its condition, and the single action that
+ * follows from that condition.
+ *
+ * The console is still here — it is genuinely useful, and the desktop install
+ * sometimes needs a package added by hand — but collapsed, because it is a
+ * power tool and it used to occupy half the display before anything was even
+ * installed.
  */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var env: LinuxEnvironment
+
+    /** Cached so onResume doesn't re-probe the port on the main thread. */
+    @Volatile private var sessionLive = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,12 +40,16 @@ class MainActivity : AppCompatActivity() {
         env = LinuxEnvironment(this)
         env.prepareScripts()
 
-        refreshState()
+        binding.toolbar.subtitle = getString(R.string.subtitle_build, env.arch, BuildConfig.GIT_SHA.take(7))
         binding.actionButton.setOnClickListener { onAction() }
+        binding.resumeButton.setOnClickListener { openViewer(env.sessionEndpoint) }
         binding.distrosButton.setOnClickListener { startActivity(Intent(this, DistrosActivity::class.java)) }
+        binding.resolutionButton.setOnClickListener { chooseResolution() }
         binding.runButton.setOnClickListener { runConsoleCommand() }
         binding.cmdInput.setOnEditorActionListener { _, _, _ -> runConsoleCommand(); true }
+        binding.consoleHeader.setOnClickListener { toggleConsole() }
 
+        refreshState()
         checkForUpdates()
     }
 
@@ -42,25 +58,161 @@ class MainActivity : AppCompatActivity() {
         refreshState()   // the active distro may have changed in DistrosActivity
     }
 
-    /** On launch, see if CI published a newer APK; if so, fetch + offer to install. */
-    private fun checkForUpdates() {
+    // --- state ---------------------------------------------------------------
+
+    private fun refreshState() {
+        val d = env.activeDistro
+        val accent = ContextCompat.getColor(this, d.accentRes)
+
+        binding.heroIcon.setImageResource(d.iconRes)
+        binding.heroIcon.imageTintList = ColorStateList.valueOf(accent)
+        binding.heroName.text = d.name
+        binding.heroSubtitle.text = d.tagline
+
+        binding.actionButton.text = when {
+            !env.isBootstrapped -> getString(R.string.action_install_ubuntu, d.name)
+            !env.isDesktopInstalled -> getString(R.string.action_install_desktop)
+            else -> getString(R.string.action_launch_desktop)
+        }
+
+        // Both of these touch the filesystem or a socket, so they are resolved
+        // off the main thread and folded back in when they arrive.
         lifecycleScope.launch {
-            val available = withContext(Dispatchers.IO) { Updater.isUpdateAvailable() }
-            if (!available) return@launch
-            appendLog("A new version is available.")
-            val apk = withContext(Dispatchers.IO) { Updater.downloadApk(this@MainActivity, ::appendLog) }
-            if (apk != null) {
-                appendLog("Tap to install the update.")
-                Updater.install(this@MainActivity, apk)
+            val installed = env.isBootstrapped
+            val running = withContext(Dispatchers.IO) { if (installed) env.isSessionRunning() else false }
+            val size = withContext(Dispatchers.IO) { if (installed) env.diskUsage(d) else 0L }
+            sessionLive = running
+
+            binding.heroChips.removeAllViews()
+            when {
+                !installed -> addChip(getString(R.string.chip_not_installed), R.color.state_absent)
+                env.isDesktopInstalled -> addChip(getString(R.string.chip_desktop_ready), R.color.state_ready)
+                else -> addChip(getString(R.string.chip_no_desktop), R.color.state_partial)
             }
+            if (running) addChip(getString(R.string.chip_session_running), R.color.state_ready)
+            if (size > 0) addChip(LinuxEnvironment.formatBytes(size), R.color.state_absent)
+
+            // A live session means the desktop is already up: offer to return to
+            // it rather than silently starting a second one.
+            binding.resumeButton.visibility = if (running) View.VISIBLE else View.GONE
         }
     }
 
-    /** Run whatever the user typed in the console, inside the container. */
+    private fun addChip(label: String, colorRes: Int) {
+        val tint = ContextCompat.getColor(this, colorRes)
+        binding.heroChips.addView(Chip(this).apply {
+            text = label
+            isClickable = false
+            isCheckable = false
+            chipStrokeWidth = 1f
+            chipStrokeColor = ColorStateList.valueOf(tint)
+            setTextColor(tint)
+            chipBackgroundColor = ColorStateList.valueOf(tint and 0x18FFFFFF)
+            chipMinHeight = 30f * resources.displayMetrics.density
+            textSize = 12f
+        })
+    }
+
+    // --- actions -------------------------------------------------------------
+
+    private fun onAction() {
+        setBusy(true, getString(R.string.progress_working))
+        lifecycleScope.launch {
+            var endpoint: String? = null
+            val result = withContext(Dispatchers.IO) {
+                when {
+                    !env.isBootstrapped -> Step.BOOTSTRAP to env.bootstrap(::appendLog)
+                    !env.isDesktopInstalled -> Step.DESKTOP to env.installDesktop(::appendLog)
+                    else -> {
+                        endpoint = env.startDesktop(resolution, ::appendLog)
+                        Step.LAUNCH to (if (endpoint != null) 0 else 1)
+                    }
+                }
+            }
+            val ok = result.second == 0
+            appendLog(if (ok) "✓ ${result.first} ok" else "✗ ${result.first} failed (${result.second})")
+            // A fresh install changes the footprint, so drop the cached figure.
+            if (result.first != Step.LAUNCH) env.invalidateDiskUsage(env.activeDistro)
+            setBusy(false)
+            if (!ok) {
+                // Failures used to be a log line the user might never see, since
+                // the log itself was scrolled away. Say it where they are looking.
+                showError(result.first)
+            }
+            refreshState()
+            endpoint?.let { openViewer(it) }   // must start the activity from the main thread
+        }
+    }
+
+    private fun showError(step: Step) {
+        val what = when (step) {
+            Step.BOOTSTRAP -> getString(R.string.err_bootstrap)
+            Step.DESKTOP -> getString(R.string.err_desktop)
+            Step.LAUNCH -> getString(R.string.err_launch)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.err_title)
+            .setMessage(what)
+            .setPositiveButton(R.string.err_show_log) { _, _ -> expandConsole() }
+            .setNegativeButton(android.R.string.ok, null)
+            .show()
+    }
+
+    /** Open the desktop viewer, keeping the session alive in the background. */
+    private fun openViewer(endpoint: String) {
+        val parts = endpoint.split(":")
+        val host = parts.getOrElse(0) { "127.0.0.1" }
+        val port = parts.getOrNull(1)?.toIntOrNull() ?: LinuxEnvironment.VNC_PORT
+        appendLog("Opening desktop viewer ($host:$port)…")
+        // A foreground-service failure must not block the viewer from opening.
+        runCatching { ContextCompat.startForegroundService(this, Intent(this, LinuxSessionService::class.java)) }
+            .onFailure { appendLog("(session service not started: ${it.message})") }
+        runCatching { VncActivity.start(this, host, port) }
+            .onFailure { appendLog("Could not open viewer: ${it.message}") }
+    }
+
+    /**
+     * Desktop resolution. A phone panel is not 1280x720, and the old fixed size
+     * meant everything was scaled to fit whether or not that suited the screen.
+     */
+    private val resolutionOptions = listOf("1280x720", "1600x900", "1920x1080", "1024x600")
+
+    private var resolution: String
+        get() = getSharedPreferences("wt", MODE_PRIVATE).getString("geometry", "1280x720") ?: "1280x720"
+        set(v) { getSharedPreferences("wt", MODE_PRIVATE).edit().putString("geometry", v).apply() }
+
+    private fun chooseResolution() {
+        val current = resolutionOptions.indexOf(resolution).coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.resolution_title)
+            .setSingleChoiceItems(resolutionOptions.toTypedArray(), current) { dialog, which ->
+                resolution = resolutionOptions[which]
+                dialog.dismiss()
+                appendLog("Desktop resolution set to ${resolutionOptions[which]} (applies on next launch).")
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    // --- console -------------------------------------------------------------
+
+    private fun toggleConsole() {
+        if (binding.consoleBody.visibility == View.VISIBLE) {
+            binding.consoleBody.visibility = View.GONE
+            binding.consoleToggle.text = getString(R.string.console_show)
+        } else expandConsole()
+    }
+
+    private fun expandConsole() {
+        binding.consoleBody.visibility = View.VISIBLE
+        binding.consoleToggle.text = getString(R.string.console_hide)
+        binding.logScroll.post { binding.logScroll.fullScroll(View.FOCUS_DOWN) }
+    }
+
     private fun runConsoleCommand() {
         val cmd = binding.cmdInput.text.toString().trim()
         if (cmd.isEmpty()) return
-        binding.cmdInput.text.clear()
+        binding.cmdInput.text?.clear()
         appendLog("$ $cmd")
         binding.runButton.isEnabled = false
         lifecycleScope.launch {
@@ -70,61 +222,42 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun refreshState() {
-        binding.actionButton.text = when {
-            !env.isBootstrapped -> getString(R.string.action_install_ubuntu, env.activeDistro.name)
-            !env.isDesktopInstalled -> getString(R.string.action_install_desktop)
-            else -> getString(R.string.action_launch_desktop)
-        }
-        binding.statusText.text =
-            getString(R.string.status_arch, env.activeDistro.name, env.arch, BuildConfig.GIT_SHA.take(7))
-    }
+    // --- plumbing ------------------------------------------------------------
 
-    private fun onAction() {
-        setBusy(true)
-        lifecycleScope.launch {
-            var endpoint: String? = null
-            val result = withContext(Dispatchers.IO) {
-                when {
-                    !env.isBootstrapped -> Step.BOOTSTRAP to env.bootstrap(::appendLog)
-                    !env.isDesktopInstalled -> Step.DESKTOP to env.installDesktop(::appendLog)
-                    else -> {
-                        endpoint = env.startDesktop("1280x720", ::appendLog)
-                        Step.LAUNCH to (if (endpoint != null) 0 else 1)
-                    }
-                }
-            }
-            appendLog(if (result.second == 0) "✓ ${result.first} ok" else "✗ ${result.first} failed (${result.second})")
-            setBusy(false)
-            refreshState()
-            // Must launch the activity from the main thread (we're back on it here).
-            endpoint?.let { launchVncViewer(it) }
-        }
-    }
-
-    /** Open the desktop in the app's own embedded VNC viewer, and keep the
-     *  Linux session alive in the background while it's shown. */
-    private fun launchVncViewer(endpoint: String) {
-        val parts = endpoint.split(":")
-        val host = parts.getOrElse(0) { "127.0.0.1" }
-        val port = parts.getOrNull(1)?.toIntOrNull() ?: 5901
-        appendLog("Opening desktop viewer ($host:$port)…")
-        // A foreground-service failure must not block the viewer from opening.
-        runCatching { ContextCompat.startForegroundService(this, Intent(this, LinuxSessionService::class.java)) }
-            .onFailure { appendLog("(session service not started: ${it.message})") }
-        runCatching { VncActivity.start(this, host, port) }
-            .onFailure { appendLog("Could not open viewer: ${it.message}") }
-    }
-
-    private fun setBusy(busy: Boolean) {
+    private fun setBusy(busy: Boolean, label: String? = null) {
         binding.actionButton.isEnabled = !busy
-        binding.progress.visibility = if (busy) android.view.View.VISIBLE else android.view.View.GONE
+        binding.distrosButton.isEnabled = !busy
+        binding.progress.visibility = if (busy) View.VISIBLE else View.GONE
+        binding.progressLabel.visibility = if (busy) View.VISIBLE else View.GONE
+        if (busy) {
+            binding.progress.isIndeterminate = true
+            binding.progressLabel.text = label
+        }
     }
 
     private fun appendLog(line: String) {
         runOnUiThread {
             binding.logView.append(line + "\n")
-            binding.logScroll.post { binding.logScroll.fullScroll(android.view.View.FOCUS_DOWN) }
+            // Surface download progress on the card, so it is visible without
+            // opening the console.
+            if (binding.progressLabel.visibility == View.VISIBLE && line.isNotBlank()) {
+                binding.progressLabel.text = line.take(90)
+            }
+            binding.logScroll.post { binding.logScroll.fullScroll(View.FOCUS_DOWN) }
+        }
+    }
+
+    /** On launch, see if CI published a newer APK; if so, fetch + offer to install. */
+    private fun checkForUpdates() {
+        lifecycleScope.launch {
+            val available = withContext(Dispatchers.IO) { Updater.isUpdateAvailable(::appendLog) }
+            if (!available) return@launch
+            appendLog("A new version is available.")
+            val apk = withContext(Dispatchers.IO) { Updater.downloadApk(this@MainActivity, ::appendLog) }
+            if (apk != null) {
+                appendLog("Tap to install the update.")
+                Updater.install(this@MainActivity, apk)
+            }
         }
     }
 

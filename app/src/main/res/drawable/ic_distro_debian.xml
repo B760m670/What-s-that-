@@ -1,0 +1,30 @@
+<!--
+  Debian: an open ring with an inward spiral terminal — a coil, echoing the
+  project's curl without reproducing its trademark.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48"
+    android:tint="@color/accent_debian">
+
+    <!-- Outer ring, open at the upper right -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M33,10 A17,17 0 1,0 39,20" />
+
+    <!-- Inner coil -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M30,17 A9,9 0 1,0 32,25" />
+
+    <!-- Coil terminal -->
+    <path android:fillColor="#FFFFFF" android:pathData="M31,27.5 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
+</vector>

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A real palette instead of three overrides on the stock Material theme.
+
+  The brand is Ubuntu orange, but the app hosts several distributions, so the
+  chrome stays neutral and each distribution carries its own accent. That keeps
+  the interface calm while still telling you at a glance which system you are
+  looking at.
+-->
+<resources>
+    <!-- Brand -->
+    <color name="brand">#E95420</color>          <!-- Ubuntu orange -->
+    <color name="brand_dark">#C7431A</color>
+    <color name="brand_container">#FFDBCF</color>
+    <color name="on_brand_container">#3A0B00</color>
+
+    <!-- Per-distribution accents. Each distro's card, icon and chips use these,
+         so the list reads as distinct systems rather than rows of text. -->
+    <color name="accent_ubuntu">#E95420</color>
+    <color name="accent_debian">#A80030</color>
+    <color name="accent_wine">#6C4AB6</color>
+    <color name="accent_generic">#546E7A</color>
+
+    <!-- Semantic state colours, used by the status chips. -->
+    <color name="state_ready">#2E7D32</color>     <!-- installed / running -->
+    <color name="state_partial">#EF6C00</color>   <!-- rootfs only, no desktop -->
+    <color name="state_absent">#78909C</color>    <!-- not installed -->
+
+    <!-- Console. The old view hardcoded green-on-grey, which was unreadable in
+         light mode; these are tuned per theme in values-night. -->
+    <color name="console_bg">#0F1419</color>
+    <color name="console_fg">#7FD962</color>
+    <color name="console_dim">#5C6B73</color>
+
+    <!-- Resting card outline. Defined rather than derived by masking the alpha
+         of a framework grey, which produced a different result per theme. -->
+    <color name="card_outline">#22000000</color>
+</resources>

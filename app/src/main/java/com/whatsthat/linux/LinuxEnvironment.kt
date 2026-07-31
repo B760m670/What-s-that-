@@ -40,7 +40,10 @@ class LinuxEnvironment(context: Context) {
     fun desktopReady(d: Distro) =
         File(distroDir(d), "usr/bin/startxfce4").exists() ||
         File(distroDir(d), "root/.wt-desktop-ready").exists()
-    fun removeDistro(d: Distro) { distroDir(d).deleteRecursively() }
+    fun removeDistro(d: Distro) {
+        distroDir(d).deleteRecursively()
+        invalidateDiskUsage(d)   // or the list would keep showing the size it no longer occupies
+    }
 
     /** Move a v1 install (filesDir/ubuntu) into the per-distro layout, once. */
     private fun migrateLegacyUbuntu() {
@@ -165,6 +168,56 @@ class LinuxEnvironment(context: Context) {
         desktopProcess = null
     }
 
+    // --- state the UI needs --------------------------------------------------
+
+    /**
+     * Whether a desktop session is live right now.
+     *
+     * The launch process is not the session: `vncserver` daemonises, so our
+     * handle can be long gone while the desktop is still up. Ask the port
+     * instead — if something accepts on the VNC socket, there is a session.
+     * Cheap enough to poll on resume, but it does touch the network stack, so
+     * callers keep it off the main thread.
+     */
+    fun isSessionRunning(): Boolean = runCatching {
+        java.net.Socket().use {
+            it.connect(java.net.InetSocketAddress("127.0.0.1", VNC_PORT), 250)
+            true
+        }
+    }.getOrDefault(false)
+
+    /** Loopback endpoint of a running session, for reconnecting to it. */
+    val sessionEndpoint: String get() = "127.0.0.1:$VNC_PORT"
+
+    /**
+     * Bytes on disk for a distro's rootfs.
+     *
+     * Walks the tree, which for a populated rootfs is tens of thousands of
+     * files and takes real time — never call this from the main thread. Results
+     * are cached per distro and invalidated when that distro changes, because
+     * the figure is stable between installs and re-walking on every screen
+     * redraw would make the list stutter.
+     */
+    fun diskUsage(d: Distro): Long {
+        diskCache[d.id]?.let { return it }
+        val bytes = runCatching { distroDir(d).walkTopDown().filter { it.isFile }.sumOf { it.length() } }
+            .getOrDefault(0L)
+        diskCache[d.id] = bytes
+        return bytes
+    }
+
+    fun invalidateDiskUsage(d: Distro? = null) {
+        if (d == null) diskCache.clear() else diskCache.remove(d.id)
+    }
+
+    private val diskCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** Total occupied by every installed distro — the app's real footprint. */
+    fun totalDiskUsage(): Long = Distros.all.filter { rootfsReady(it) }.sumOf { diskUsage(it) }
+
+    /** Free space on the volume the rootfs lives on, so the UI can warn before a download. */
+    fun freeSpace(): Long = runCatching { android.os.StatFs(home.path).availableBytes }.getOrDefault(0L)
+
     /** End the running session: kill the VNC server inside the container (it
      *  daemonizes, so destroying our launch process isn't enough), then drop
      *  our handle. Safe to call when nothing is running. */
@@ -244,5 +297,18 @@ class LinuxEnvironment(context: Context) {
         val process = pb.start()
         process.inputStream.bufferedReader().forEachLine(onLog)
         return process.waitFor()
+    }
+
+    companion object {
+        /** start-desktop.sh puts the session on display :1, i.e. 5900 + 1. */
+        const val VNC_PORT = 5901
+
+        /** Human-readable byte size — the UI shows several of these. */
+        fun formatBytes(bytes: Long): String = when {
+            bytes <= 0 -> "—"
+            bytes >= 1L shl 30 -> String.format("%.1f GB", bytes.toDouble() / (1L shl 30))
+            bytes >= 1L shl 20 -> String.format("%.0f MB", bytes.toDouble() / (1L shl 20))
+            else -> String.format("%.0f KB", bytes.toDouble() / 1024)
+        }
     }
 }

@@ -5,6 +5,7 @@ import org.tukaani.xz.XZInputStream
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.FilterInputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.HttpURLConnection
@@ -25,6 +26,13 @@ class RootfsInstaller(
     private val arch: String,
     private val distro: Distro,
     private val onLog: (String) -> Unit,
+    /**
+     * Structured progress for the UI. Every long phase here has a byte count
+     * available, so none of them needs to be a spinner; the log line remains
+     * for the record, but it is not how someone should have to tell whether a
+     * 500 MB download is moving.
+     */
+    private val onProgress: (Progress) -> Unit = {},
 ) {
     /** Returns 0 on success, non-zero on failure. */
     fun install(): Int {
@@ -46,6 +54,7 @@ class RootfsInstaller(
             val tmp = File(home, "tmp").apply { mkdirs() }
             val tarball = File(tmp, "${distro.id}-rootfs.tar.xz")
 
+            onProgress(Progress(Progress.Phase.RESOLVE))
             onLog("[bootstrap] Resolving ${distro.name} image…")
             val url = distro.resolveUrl(arch) { httpText(it) }
             val fname = url.substringAfterLast('/')
@@ -70,6 +79,7 @@ class RootfsInstaller(
             onLog("[bootstrap] Extracting rootfs (this runs once) …")
             extractTarXz(tarball)
 
+            onProgress(Progress(Progress.Phase.FINALISE))
             // Some images ship resolv.conf as a dangling symlink; write real files.
             File(rootfs, "etc").mkdirs()
             File(rootfs, "etc/resolv.conf").apply { delete(); writeText("nameserver 8.8.8.8\nnameserver 1.1.1.1\n") }
@@ -83,6 +93,28 @@ class RootfsInstaller(
             onLog("[bootstrap] failed: ${e.message}")
             1
         }
+    }
+
+    // --- progress ------------------------------------------------------------
+
+    /** Timestamp of the last emitted update, so the UI isn't flooded. */
+    private var lastEmit = 0L
+
+    /**
+     * Report progress at most every [MIN_EMIT_MS], plus always on the final
+     * byte. A 64 KB read loop over half a gigabyte fires ~8000 times; every one
+     * of those would otherwise cross to the main thread to move a bar by less
+     * than a pixel.
+     */
+    private fun emit(phase: Progress.Phase, done: Long, total: Long, startedAt: Long) {
+        val now = System.currentTimeMillis()
+        if (now - lastEmit < MIN_EMIT_MS && done != total) return
+        lastEmit = now
+        val elapsed = (now - startedAt) / 1000.0
+        // Below half a second the average is mostly noise, so report no rate
+        // rather than a wild one that produces a nonsense time estimate.
+        val rate = if (elapsed >= 0.5) (done / elapsed).toLong() else 0L
+        onProgress(Progress(phase, done, total, rate))
     }
 
     // --- networking ----------------------------------------------------------
@@ -117,6 +149,7 @@ class RootfsInstaller(
         val conn = openFollowingRedirects(spec)
         try {
             val total = conn.contentLength.toLong()   // Int API works on minSdk 21 (rootfs < 2GB)
+            val startedAt = System.currentTimeMillis()
             conn.inputStream.use { input ->
                 FileOutputStream(dest).use { out ->
                     val buf = ByteArray(64 * 1024)
@@ -127,9 +160,12 @@ class RootfsInstaller(
                         if (n < 0) break
                         out.write(buf, 0, n)
                         done += n
+                        emit(Progress.Phase.DOWNLOAD, done, total, startedAt)
                         if (total > 0) {
+                            // Coarser than the bar: this is the record in the
+                            // log, not the thing being watched.
                             val pct = (done * 100 / total).toInt()
-                            if (pct >= lastPct + 10) { onLog("[bootstrap] $pct%"); lastPct = pct }
+                            if (pct >= lastPct + 25) { onLog("[bootstrap] $pct%"); lastPct = pct }
                         }
                     }
                 }
@@ -151,12 +187,17 @@ class RootfsInstaller(
 
     private fun sha256(file: File): String {
         val md = MessageDigest.getInstance("SHA-256")
+        val total = file.length()
+        val startedAt = System.currentTimeMillis()
+        var done = 0L
         file.inputStream().use { input ->
             val buf = ByteArray(64 * 1024)
             while (true) {
                 val n = input.read(buf)
                 if (n < 0) break
                 md.update(buf, 0, n)
+                done += n
+                emit(Progress.Phase.VERIFY, done, total, startedAt)
             }
         }
         return md.digest().joinToString("") { "%02x".format(it.toInt() and 0xFF) }
@@ -165,7 +206,10 @@ class RootfsInstaller(
     // --- extraction (XZ + minimal USTAR/GNU tar) -----------------------------
 
     private fun extractTarXz(tarball: File) {
-        XZInputStream(BufferedInputStream(tarball.inputStream())).use { xz ->
+        // Progress is measured on the compressed side: the uncompressed size is
+        // not known until the archive ends, but how much of the .tar.xz has been
+        // consumed is known exactly and advances at a steady rate.
+        XZInputStream(counting(tarball, Progress.Phase.EXTRACT)).use { xz ->
             val header = ByteArray(512)
             var longName: String? = null
             var longLink: String? = null
@@ -229,6 +273,23 @@ class RootfsInstaller(
                 }
                 skipPadding(xz, size)
             }
+        }
+    }
+
+    /** A buffered stream over [file] that reports how much of it has been read. */
+    private fun counting(file: File, phase: Progress.Phase): InputStream {
+        val total = file.length()
+        val startedAt = System.currentTimeMillis()
+        return object : FilterInputStream(BufferedInputStream(file.inputStream())) {
+            private var consumed = 0L
+            override fun read(): Int =
+                super.read().also { if (it >= 0) { consumed++; emit(phase, consumed, total, startedAt) } }
+
+            override fun read(b: ByteArray, off: Int, len: Int): Int =
+                super.read(b, off, len).also { if (it > 0) { consumed += it; emit(phase, consumed, total, startedAt) } }
+
+            override fun skip(n: Long): Long =
+                super.skip(n).also { if (it > 0) { consumed += it; emit(phase, consumed, total, startedAt) } }
         }
     }
 
@@ -308,5 +369,10 @@ class RootfsInstaller(
     private fun octal(b: ByteArray, off: Int, len: Int): Long {
         val s = cString(b, off, len).trim()
         return if (s.isEmpty()) 0 else s.toLong(8)
+    }
+
+    private companion object {
+        /** ~7 updates a second: smooth to the eye, cheap for the main thread. */
+        const val MIN_EMIT_MS = 150L
     }
 }

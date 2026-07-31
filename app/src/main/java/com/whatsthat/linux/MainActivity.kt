@@ -121,8 +121,8 @@ class MainActivity : AppCompatActivity() {
             var endpoint: String? = null
             val result = withContext(Dispatchers.IO) {
                 when {
-                    !env.isBootstrapped -> Step.BOOTSTRAP to env.bootstrap(::appendLog)
-                    !env.isDesktopInstalled -> Step.DESKTOP to env.installDesktop(::appendLog)
+                    !env.isBootstrapped -> Step.BOOTSTRAP to env.bootstrap(::appendLog, ::showProgress)
+                    !env.isDesktopInstalled -> Step.DESKTOP to env.installDesktop(::appendLog, ::showProgress)
                     else -> {
                         endpoint = env.startDesktop(resolution, ::appendLog)
                         Step.LAUNCH to (if (endpoint != null) 0 else 1)
@@ -224,23 +224,104 @@ class MainActivity : AppCompatActivity() {
 
     // --- plumbing ------------------------------------------------------------
 
+    /**
+     * True while a byte-counted phase owns the caption, so log lines stop
+     * writing over it — "231 MB of 487 MB · 2 min left" beats whatever the last
+     * line of output happened to say.
+     */
+    private var labelOwned = false
+
     private fun setBusy(busy: Boolean, label: String? = null) {
         binding.actionButton.isEnabled = !busy
         binding.distrosButton.isEnabled = !busy
-        binding.progress.visibility = if (busy) View.VISIBLE else View.GONE
-        binding.progressLabel.visibility = if (busy) View.VISIBLE else View.GONE
         if (busy) {
-            binding.progress.isIndeterminate = true
+            labelOwned = false
+            setIndeterminate(true)
+            binding.progress.visibility = View.VISIBLE
+            binding.progressLabel.visibility = View.VISIBLE
             binding.progressLabel.text = label
+        } else {
+            binding.progress.visibility = View.GONE
+            binding.progressLabel.visibility = View.GONE
         }
+    }
+
+    /**
+     * LinearProgressIndicator refuses to change mode while it is on screen, so
+     * the switch has to happen with the view hidden.
+     */
+    private fun setIndeterminate(value: Boolean) {
+        if (binding.progress.isIndeterminate == value) return
+        val wasVisible = binding.progress.visibility == View.VISIBLE
+        binding.progress.visibility = View.GONE
+        binding.progress.isIndeterminate = value
+        if (wasVisible) binding.progress.visibility = View.VISIBLE
+    }
+
+    /** Drive the bar and its caption from a structured [Progress] report. */
+    private fun showProgress(p: Progress) {
+        runOnUiThread {
+            if (binding.progress.visibility != View.VISIBLE) return@runOnUiThread
+            val pct = p.percent
+            setIndeterminate(pct < 0)
+            if (pct >= 0) binding.progress.setProgressCompat(pct, true)
+            // A byte-counted phase produces no other output, so it keeps the
+            // caption. The desktop install streams apt's own output, which is a
+            // far better sign of life than a step name sitting unchanged for
+            // minutes — there the bar carries the step and the caption moves.
+            labelOwned = pct >= 0 && p.countsBytes
+            binding.progressLabel.text = describe(p)
+        }
+    }
+
+    private fun describe(p: Progress): String {
+        val verb = p.label ?: getString(
+            when (p.phase) {
+                Progress.Phase.RESOLVE -> R.string.phase_resolve
+                Progress.Phase.DOWNLOAD -> R.string.phase_download
+                Progress.Phase.VERIFY -> R.string.phase_verify
+                Progress.Phase.EXTRACT -> R.string.phase_extract
+                Progress.Phase.FINALISE -> R.string.phase_finalise
+                Progress.Phase.DESKTOP -> R.string.phase_desktop
+            }
+        )
+        if (p.percent < 0) return verb
+        // Steps, not bytes: "Installing the XFCE desktop — step 4 of 7".
+        if (!p.countsBytes) return getString(R.string.progress_step, verb, p.done + 1, p.total)
+        val sb = StringBuilder(
+            getString(
+                R.string.progress_of,
+                verb,
+                LinuxEnvironment.formatBytes(p.done),
+                LinuxEnvironment.formatBytes(p.total),
+                p.percent,
+            )
+        )
+        // The estimate is only shown for the download, where the rate reflects
+        // the network and stays roughly steady. Hashing and unpacking are
+        // CPU-bound and their early figures swing wildly.
+        if (p.phase == Progress.Phase.DOWNLOAD) {
+            if (p.bytesPerSecond > 0) sb.append(getString(R.string.progress_rate, LinuxEnvironment.formatBytes(p.bytesPerSecond)))
+            val left = p.secondsLeft
+            // Anything beyond a few hours is a figure from a stalling connection,
+            // not information; showing it would only mislead.
+            if (left in 1L..21_600L) sb.append(getString(R.string.progress_left, formatDuration(left)))
+        }
+        return sb.toString()
+    }
+
+    private fun formatDuration(seconds: Long): String = when {
+        seconds < 60 -> getString(R.string.duration_seconds, seconds)
+        seconds < 3600 -> getString(R.string.duration_minutes, seconds / 60)
+        else -> getString(R.string.duration_hours, seconds / 3600, (seconds % 3600) / 60)
     }
 
     private fun appendLog(line: String) {
         runOnUiThread {
             binding.logView.append(line + "\n")
-            // Surface download progress on the card, so it is visible without
-            // opening the console.
-            if (binding.progressLabel.visibility == View.VISIBLE && line.isNotBlank()) {
+            // Surface what is happening on the card, so it is visible without
+            // opening the console — unless a counted phase owns the label.
+            if (!labelOwned && binding.progressLabel.visibility == View.VISIBLE && line.isNotBlank()) {
                 binding.progressLabel.text = line.take(90)
             }
             binding.logScroll.post { binding.logScroll.fullScroll(View.FOCUS_DOWN) }

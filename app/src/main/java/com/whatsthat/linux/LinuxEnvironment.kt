@@ -111,13 +111,23 @@ class LinuxEnvironment(context: Context) {
      * Download + verify + extract the active distro's rootfs, in-process (the
      * Android sandbox has no curl/tar/xz), see [RootfsInstaller].
      */
-    fun bootstrap(onLog: (String) -> Unit): Int = bootstrapDistro(activeDistro, onLog)
+    fun bootstrap(onLog: (String) -> Unit, onProgress: (Progress) -> Unit = {}): Int =
+        bootstrapDistro(activeDistro, onLog, onProgress)
 
-    fun bootstrapDistro(d: Distro, onLog: (String) -> Unit): Int =
-        RootfsInstaller(home = home, rootfs = distroDir(d), arch = arch, distro = d, onLog = onLog).install()
+    fun bootstrapDistro(d: Distro, onLog: (String) -> Unit, onProgress: (Progress) -> Unit = {}): Int =
+        RootfsInstaller(
+            home = home, rootfs = distroDir(d), arch = arch, distro = d,
+            onLog = onLog, onProgress = onProgress,
+        ).install()
 
-    /** Install the desktop inside the active distro's container. */
-    fun installDesktop(onLog: (String) -> Unit): Int =
+    /**
+     * Install the desktop inside the active distro's container.
+     *
+     * The script announces each of its phases as `[step] n/total <label>`; those
+     * lines are turned into [Progress] so the wait has a bar rather than a
+     * spinner, and are still logged so the console keeps the full record.
+     */
+    fun installDesktop(onLog: (String) -> Unit, onProgress: (Progress) -> Unit = {}): Int =
         execScript(
             "install-desktop.sh", insideContainer = true,
             extraEnv = mapOf(
@@ -125,8 +135,24 @@ class LinuxEnvironment(context: Context) {
                 "WT_PKG" to activeDistro.pkg.name.lowercase(),
                 "WT_DISTRO" to activeDistro.id,
             ),
-            onLog = onLog,
+            onLog = { line ->
+                parseStep(line)?.let(onProgress)
+                onLog(line)
+            },
         )
+
+    private fun parseStep(line: String): Progress? {
+        val m = STEP_MARKER.find(line.trim()) ?: return null
+        val (done, total, label) = m.destructured
+        // Reported as "step n finished" — the bar should show the work done, and
+        // a step that has only just started has not contributed any yet.
+        return Progress(
+            phase = Progress.Phase.DESKTOP,
+            done = done.toLong() - 1,
+            total = total.toLong(),
+            label = label.trim(),
+        )
+    }
 
     /**
      * Start the XFCE/VNC session and return the loopback "host:port" to connect
@@ -304,6 +330,9 @@ class LinuxEnvironment(context: Context) {
         const val VNC_PORT = 5901
 
         /** Human-readable byte size — the UI shows several of these. */
+        /** `[step] 3/7 Installing the XFCE desktop` — emitted by install-desktop.sh. */
+        private val STEP_MARKER = Regex("""^\[step] (\d+)/(\d+) (.*)$""")
+
         fun formatBytes(bytes: Long): String = when {
             bytes <= 0 -> "—"
             bytes >= 1L shl 30 -> String.format("%.1f GB", bytes.toDouble() / (1L shl 30))

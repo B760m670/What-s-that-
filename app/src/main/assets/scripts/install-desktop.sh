@@ -12,6 +12,17 @@ set -eu
 export DEBIAN_FRONTEND=noninteractive
 PROFILE="${WT_PROFILE:-full}"
 
+# The app parses these markers to show a real progress bar. apt gives no usable
+# overall percentage across a dozen separate invocations, but the sequence of
+# steps here is fixed and known, so counting them is honest and legible.
+STEP=0
+# Keep these in step with the number of step() calls on each branch below.
+if [ "$PROFILE" = "lite" ]; then TOTAL_STEPS=5; else TOTAL_STEPS=7; fi
+step() {
+    STEP=$((STEP + 1))
+    echo "[step] $STEP/$TOTAL_STEPS $1"
+}
+
 # Trust the rootfs itself, not what the app thinks is active — that's the single
 # source of truth and avoids writing the wrong distro's repos.
 DISTRO_ID="unknown"
@@ -22,6 +33,8 @@ if [ -r /etc/os-release ]; then
     PRETTY="${PRETTY_NAME:-$DISTRO_ID}"
 fi
 echo "[install] Profile: $PROFILE  Rootfs: $PRETTY  (app said: ${WT_DISTRO:-?})"
+
+step "Preparing package sources"
 
 # Only Ubuntu's cloud image ships a stale/edited sources.list that needs a full
 # rewrite. Debian (and other images) already have a correct, signed sources.list
@@ -49,7 +62,7 @@ mkdir -p /etc/apt/apt.conf.d
 echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries
 echo 'Acquire::http::No-Cache "true";' > /etc/apt/apt.conf.d/81-nocache
 
-echo "[install] Updating package lists..."
+step "Updating package lists"
 apt-get update -y || apt-get update -y || apt-get update -y || \
     echo "[install] apt update had partial errors — continuing with available indexes."
 
@@ -60,7 +73,7 @@ rm -f /etc/apt/apt.conf.d/81-nocache   # package downloads may use the fast CDN 
 dpkg --configure -a || true
 apt-get install -f -y || true
 
-echo "[install] Installing base utilities..."
+step "Installing base utilities"
 apt-get install -y --no-install-recommends \
     ca-certificates curl wget nano less sudo procps \
     locales dbus-x11 tzdata \
@@ -72,17 +85,17 @@ apt-get install -y --no-install-recommends \
 locale-gen en_US.UTF-8 || true
 
 if [ "$PROFILE" = "lite" ]; then
-    echo "[install] Installing lite desktop (Openbox)..."
+    step "Installing the lite desktop"
     apt-get install -y --no-install-recommends \
         openbox obconf tint2 \
         xterm pcmanfm \
         nano || echo "[install] Some lite extras failed — desktop still usable."
     SESSION_CMD="openbox-session"
 else
-    echo "[install] Installing XFCE desktop..."
+    step "Installing the XFCE desktop"
     apt-get install -y --no-install-recommends \
         xfce4 xfce4-terminal xfce4-goodies
-    echo "[install] Installing everyday tools (files, editor, dev)..."
+    step "Installing everyday tools"
     apt-get install -y --no-install-recommends \
         mousepad ristretto \
         git python3 python3-pip build-essential \
@@ -93,7 +106,7 @@ else
     # above. firefox-esr only exists on Debian (Ubuntu ships Firefox as a snap,
     # which can't run under proot), so fall back to a real .deb browser that
     # exists on whichever distro this is.
-    echo "[install] Installing a web browser..."
+    step "Installing a web browser"
     BROWSER_OK=0
     for b in firefox-esr epiphany-browser falkon midori netsurf-gtk; do
         if apt-get install -y --no-install-recommends "$b"; then
@@ -107,7 +120,7 @@ else
     SESSION_CMD="startxfce4"
 fi
 
-echo "[install] Cleaning apt caches to keep the install light..."
+step "Cleaning up"
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 

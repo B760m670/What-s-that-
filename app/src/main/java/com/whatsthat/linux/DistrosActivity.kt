@@ -129,15 +129,29 @@ class DistrosActivity : AppCompatActivity() {
     private fun gpuSection() {
         header(getString(R.string.gpu_title), 22f, bold = true, topDp = 32f)
         val on = env.gpuEnabled
-        hint("Currently: ${if (on) "ON — GL goes to the phone GPU" else "OFF — GL is rendered on the CPU"}.\n\n" +
-            "This only changes who draws inside the container; the picture still reaches " +
-            "the screen the same way. It can speed up 3D programs, but it has also been " +
-            "seen to make GL applications crash outright rather than run slowly — which " +
-            "can take a whole desktop session down with it. Leave it off unless you are " +
-            "testing it.")
+        hint("Currently: ${if (on) "ON — GL goes to the phone GPU (virgl)" else "OFF — GL is rendered on the CPU"}.\n\n" +
+            "This changes who draws inside the container. It can speed up 3D programs, " +
+            "but it has also been seen to make GL applications crash outright rather " +
+            "than run slowly, which can take a whole desktop session down with it.")
         list.addView(Button(this).apply {
             text = if (on) getString(R.string.gpu_disable) else getString(R.string.gpu_enable)
             setOnClickListener { env.gpuEnabled = !on; rebuild() }
+        })
+
+        // The display backend used to be a long-press on the launch button — an
+        // invisible control with no visible state, next to a separate GPU button.
+        // The two were duly mistaken for each other, and a comparison meant to be
+        // "virgl on vs off" came out as "one transport vs the other, virgl on in
+        // both". Both settings now sit here, each stating what it currently is.
+        header(getString(R.string.backend_title), 22f, bold = true, topDp = 32f)
+        val fb = env.displayBackend == "fb"
+        hint("Currently: ${if (fb) "framebuffer (experimental)" else "VNC (default)"}.\n\n" +
+            "This is how the picture reaches the screen — unrelated to the setting " +
+            "above. Measured no faster in practice, and it tears on video, so VNC " +
+            "remains the sensible choice.")
+        list.addView(Button(this).apply {
+            text = if (fb) getString(R.string.backend_use_vnc) else getString(R.string.backend_use_fb)
+            setOnClickListener { env.displayBackend = if (fb) "vnc" else "fb"; rebuild() }
         })
     }
 

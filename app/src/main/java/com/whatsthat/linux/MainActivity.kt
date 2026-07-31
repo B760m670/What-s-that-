@@ -30,8 +30,6 @@ class MainActivity : AppCompatActivity() {
 
         refreshState()
         binding.actionButton.setOnClickListener { onAction() }
-        // Hidden, experimental: long-press flips VNC <-> framebuffer backend.
-        binding.actionButton.setOnLongClickListener { toggleBackend(); true }
         binding.distrosButton.setOnClickListener { startActivity(Intent(this, DistrosActivity::class.java)) }
         binding.runButton.setOnClickListener { runConsoleCommand() }
         binding.cmdInput.setOnEditorActionListener { _, _, _ -> runConsoleCommand(); true }
@@ -79,7 +77,13 @@ class MainActivity : AppCompatActivity() {
             else -> getString(R.string.action_launch_desktop)
         }
         binding.statusText.text =
-            getString(R.string.status_arch, env.activeDistro.name, env.arch, BuildConfig.GIT_SHA.take(7))
+            getString(R.string.status_arch, env.activeDistro.name, env.arch, BuildConfig.GIT_SHA.take(7)) +
+                // State the settings that change what a launch does. They lived
+                // only behind buttons on another screen, so a run could differ
+                // from the one intended without anything saying so.
+                "\n${env.activeDesktopEnv.name} · " +
+                (if (env.gpuEnabled) "GPU GL on" else "GPU GL off") + " · " +
+                (if (env.displayBackend == "fb") "framebuffer" else "VNC")
     }
 
     private fun onAction() {
@@ -120,15 +124,6 @@ class MainActivity : AppCompatActivity() {
                     .onFailure { appendLog("Could not open viewer: ${it.message}") }
             }
         }
-    }
-
-    /** Long-press the action button to flip the display backend (experimental). */
-    private fun toggleBackend() {
-        val next = if (env.displayBackend == "fb") "vnc" else "fb"
-        env.displayBackend = next
-        val label = if (next == "fb") "framebuffer (experimental)" else "VNC"
-        appendLog("Display backend set to: $label. Launch the desktop to use it.")
-        android.widget.Toast.makeText(this, "Backend: $label", android.widget.Toast.LENGTH_SHORT).show()
     }
 
     private fun setBusy(busy: Boolean) {

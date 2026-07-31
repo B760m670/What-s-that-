@@ -132,11 +132,18 @@ fi
 session_health_report() {  # $1=log dir  $2=log filename suffix
     dir="$1"; suffix="$2"
     sleep 12
+    # Match any *.log, not just <host>:<display>.log — that guess found nothing
+    # on device. Where it still finds nothing, list the directory instead of
+    # saying "no log": knowing what IS there is what fixes the next attempt.
     log=$(ls -t "$dir"/*"$suffix" 2>/dev/null | head -1)
+    [ -n "$log" ] || log=$(ls -t "$dir"/*.log 2>/dev/null | head -1)
+    [ -n "$log" ] || log=$(ls -t /tmp/.wt-session.log /root/.xsession-errors 2>/dev/null | head -1)
     if [ -z "$log" ]; then
-        echo "[session] no session log found in $dir"
+        echo "[session] no log found. $dir contains:"
+        ls -a "$dir" 2>/dev/null | head -12 | sed 's/^/[session]   /'
         return 0
     fi
+    echo "[session] reading $log"
     hits=$(grep -aiE 'Oh no|has gone wrong|failed to (start|initialize|create|register)|could not|cannot open|no such file|segmentation|core dumped|not authorized|Fatal|GLX|EGL_|libGL error|assertion|unrecoverable|Unable to' \
         "$log" 2>/dev/null | tail -12)
     if [ -n "$hits" ]; then

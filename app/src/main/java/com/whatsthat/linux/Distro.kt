@@ -16,6 +16,12 @@ class Distro(
     /** Optional SHA256SUMS URL for integrity verification. */
     val checksumUrl: ((arch: String) -> String)? = null,
     val experimental: Boolean = false,
+    /** Vector mark shown in the list and on the main screen. */
+    val iconRes: Int = R.drawable.ic_distro_ubuntu,
+    /** Accent tint for this distro's card, icon and chips. */
+    val accentRes: Int = R.color.accent_generic,
+    /** One line under the name: what this distro is for. */
+    val tagline: String = "",
 )
 
 object Distros {
@@ -50,10 +56,16 @@ object Distros {
                     "ubuntu-22.04-server-cloudimg-${debArch(arch)}-root.tar.xz"
             },
             checksumUrl = { "https://cloud-images.ubuntu.com/releases/22.04/release/SHA256SUMS" },
+            iconRes = R.drawable.ic_distro_ubuntu,
+            accentRes = R.color.accent_ubuntu,
+            tagline = "Long-term support. The most familiar starting point.",
         ),
         Distro(
             id = "debian", name = "Debian 12 (Bookworm)", pkg = PkgManager.APT,
             resolveUrl = lxc("debian", "bookworm"),
+            iconRes = R.drawable.ic_distro_debian,
+            accentRes = R.color.accent_debian,
+            tagline = "Stable and lean. Ships Firefox ESR as a real package.",
         ),
         // Our OWN pre-built image: Box64 + Wine + a light Openbox desktop baked
         // in (built in CI). EXPERIMENTAL — on a Mali GPU only software rendering
@@ -66,6 +78,9 @@ object Distros {
                 else error("The Wine image is arm64-only for now")
             },
             experimental = true,
+            iconRes = R.drawable.ic_distro_wine,
+            accentRes = R.color.accent_wine,
+            tagline = "Debian with Box64 + Wine baked in, for Windows programs.",
         ),
     )
 

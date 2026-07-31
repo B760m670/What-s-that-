@@ -1,8 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!--
+      Material 3 with a filled-in scheme. This previously set three colours and
+      left the rest to defaults, so cards, chips and dialogs had no relationship
+      to the brand and dark mode was whatever the platform happened to pick.
+
+      The chrome is deliberately neutral: the app hosts several distributions,
+      and each carries its own accent (see colors.xml), so the interface stays
+      calm while still saying at a glance which system you are looking at.
+    -->
     <style name="Theme.WhatsThatLinux" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">#E95420</item>      <!-- Ubuntu orange -->
-        <item name="colorPrimaryVariant">#772953</item> <!-- Ubuntu aubergine -->
+        <item name="colorPrimary">@color/brand</item>
         <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorPrimaryContainer">@color/brand_container</item>
+        <item name="colorOnPrimaryContainer">@color/on_brand_container</item>
+
+        <item name="colorSecondary">#77216F</item>          <!-- Ubuntu aubergine -->
+        <item name="colorOnSecondary">#FFFFFF</item>
+        <item name="colorSecondaryContainer">#F3DAF0</item>
+        <item name="colorOnSecondaryContainer">#2E0029</item>
+
+        <item name="android:statusBarColor">@color/brand_dark</item>
+
+        <!-- Rounded, consistent shapes for cards, dialogs and buttons. -->
+        <item name="shapeAppearanceCornerSmall">@style/Shape.WT.Small</item>
+        <item name="shapeAppearanceCornerMedium">@style/Shape.WT.Medium</item>
+        <item name="shapeAppearanceCornerLarge">@style/Shape.WT.Large</item>
+    </style>
+
+    <style name="Shape.WT.Small" parent="ShapeAppearance.Material3.Corner.Small">
+        <item name="cornerSize">10dp</item>
+    </style>
+    <style name="Shape.WT.Medium" parent="ShapeAppearance.Material3.Corner.Medium">
+        <item name="cornerSize">18dp</item>
+    </style>
+    <style name="Shape.WT.Large" parent="ShapeAppearance.Material3.Corner.Large">
+        <item name="cornerSize">26dp</item>
+    </style>
+
+    <!-- Text roles, so sizes stop being scattered as magic numbers in layouts. -->
+    <style name="Text.WT.Title" parent="TextAppearance.Material3.HeadlineSmall">
+        <item name="android:textStyle">bold</item>
+    </style>
+    <style name="Text.WT.Section" parent="TextAppearance.Material3.TitleMedium" />
+    <style name="Text.WT.Caption" parent="TextAppearance.Material3.BodySmall">
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
     </style>
 </resources>

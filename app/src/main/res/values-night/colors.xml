@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Dark-mode overrides. The containers and the light-mode accents are too dark
+  to read on a dark surface, so they are lifted rather than reused; the console
+  keeps its dark look in both themes since a terminal reads best that way.
+-->
+<resources>
+    <color name="brand_container">#5C2410</color>
+    <color name="on_brand_container">#FFDBCF</color>
+
+    <color name="accent_ubuntu">#FF8A5C</color>
+    <color name="accent_debian">#FF6E8A</color>
+    <color name="accent_wine">#B39DFF</color>
+    <color name="accent_generic">#90A4AE</color>
+
+    <color name="state_ready">#81C784</color>
+    <color name="state_partial">#FFB74D</color>
+    <color name="state_absent">#90A4AE</color>
+
+    <color name="card_outline">#33FFFFFF</color>
+</resources>

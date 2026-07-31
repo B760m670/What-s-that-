@@ -65,44 +65,23 @@ apt-get install -y --no-install-recommends \
     ca-certificates curl wget nano less sudo procps \
     locales dbus-x11 tzdata \
     tigervnc-standalone-server tigervnc-common \
-    xvfb \
     pulseaudio pulseaudio-utils \
     fonts-dejavu-core
-
-# Mesa's DRI drivers, including `virgl` — the client half of GPU acceleration.
-# It renders nothing itself: it serialises GL onto the socket held by the
-# host-side server (see GpuBridge.kt), which is the only process on the device
-# that can reach the vendor driver. Without this package the guest has no virgl
-# and silently stays on llvmpipe, so install it on its own and say so if it
-# fails. mesa-utils is what makes the difference checkable on-device:
-# `glxinfo -B` names the renderer, `glxgears` shows whether it moves.
-echo "[install] Installing Mesa (virgl GPU passthrough + GL diagnostics)..."
-apt-get install -y --no-install-recommends \
-    libgl1-mesa-dri libglx-mesa0 mesa-utils || \
-    echo "[install] Mesa install failed — desktop will be software-rendered."
 
 # Generate a UTF-8 locale so apps render correctly.
 locale-gen en_US.UTF-8 || true
 
-# Which desktop to install is chosen in the app, not baked in here: the same
-# rootfs can host any of them, and a second one can be added later without
-# disturbing the first. The app passes the package list and session binary so
-# this script does not have to keep its own copy of that table.
-DE_NAME="${WT_DE_NAME:-XFCE}"
-DE_PACKAGES="${WT_DE_PACKAGES:-xfce4 xfce4-terminal xfce4-goodies}"
-SESSION_CMD="${WT_DE_SESSION:-startxfce4}"
-
-echo "[install] Desktop environment: $DE_NAME (session: $SESSION_CMD)"
-echo "[install] Installing $DE_NAME..."
-if ! apt-get install -y --no-install-recommends $DE_PACKAGES; then
-    echo "[install] $DE_NAME failed to install. Falling back to XFCE."
-    DE_NAME="XFCE"; SESSION_CMD="startxfce4"
-    apt-get install -y --no-install-recommends xfce4 xfce4-terminal xfce4-goodies
-fi
-
 if [ "$PROFILE" = "lite" ]; then
-    echo "[install] Lite profile — skipping the extra tool set."
+    echo "[install] Installing lite desktop (Openbox)..."
+    apt-get install -y --no-install-recommends \
+        openbox obconf tint2 \
+        xterm pcmanfm \
+        nano || echo "[install] Some lite extras failed — desktop still usable."
+    SESSION_CMD="openbox-session"
 else
+    echo "[install] Installing XFCE desktop..."
+    apt-get install -y --no-install-recommends \
+        xfce4 xfce4-terminal xfce4-goodies
     echo "[install] Installing everyday tools (files, editor, dev)..."
     apt-get install -y --no-install-recommends \
         mousepad ristretto \
@@ -125,6 +104,7 @@ else
         fi
     done
     [ "$BROWSER_OK" = 1 ] || echo "[install] No browser available — add one later via the console."
+    SESSION_CMD="startxfce4"
 fi
 
 echo "[install] Cleaning apt caches to keep the install light..."
@@ -143,4 +123,4 @@ dbus-launch --exit-with-session $SESSION_CMD
 EOF
 chmod +x /root/.vnc/xstartup
 
-echo "[install] $DE_NAME installed (profile: $PROFILE, session: $SESSION_CMD)."
+echo "[install] Desktop installed (profile: $PROFILE)."

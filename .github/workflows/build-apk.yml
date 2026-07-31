@@ -5,10 +5,13 @@ name: Build APK
 # Signed with the committed debug.keystore, so its signature matches every other
 # build and the in-app updater installs over the top.
 #
-# Every branch gets a downloadable workflow artifact, but only the default
-# branch publishes to the rolling `latest-apk` release: that release is what
-# every installed app self-updates from, so a push to a feature branch must not
-# be able to ship itself to users' phones.
+# Every branch gets a downloadable workflow artifact, but only a release branch
+# publishes to the rolling `latest-apk` release: that release is what every
+# installed app self-updates from, so a push to some other branch must not be
+# able to ship itself to users' phones.
+#
+# The release branches are the repository's default branch and RELEASE_BRANCH
+# below.
 on:
   push:
   workflow_dispatch:
@@ -16,13 +19,19 @@ on:
 permissions:
   contents: write   # to publish the rolling release
 
-# Merging and then syncing the working branch produces two pushes of the SAME
-# commit seconds apart. Both used to resolve the full dependency graph at once,
-# and Maven Central answered the second with 429 Too Many Requests, failing a
-# build of code that had just succeeded. Serialise per commit so they never
-# compete; cancel-in-progress stays false because the first of the pair is the
-# default-branch run that publishes the release, and cancelling it would drop
-# the update users are waiting for.
+# Naming the working branch as a release branch is what removes the merge
+# round-trip: development used to land on a branch, get merged to the default
+# branch purely so the release job would run, and then be synced back — three
+# pushes and two full builds for one change, when all the merge bought was
+# passing that one condition.
+env:
+  RELEASE_BRANCH: claude/apk-artifacts-github-actions-rk0qxt
+
+# One run per commit. This was added when merge-then-sync pushed the same commit
+# twice within seconds and Maven Central answered the second run's dependency
+# resolution with 429 Too Many Requests; that pattern is gone now, but the guard
+# costs nothing and still covers a re-push of an identical commit.
+# cancel-in-progress stays false: a cancelled run is a dropped release.
 concurrency:
   group: build-apk-${{ github.sha }}
   cancel-in-progress: false
@@ -83,10 +92,14 @@ jobs:
           if-no-files-found: error
 
       - name: Publish APK to a rolling GitHub Release
-        # Default branch only — see the note at the top of this file. Compared
-        # against the repository's own default branch rather than a hardcoded
-        # name, so renaming the branch can't silently re-open the hole.
-        if: github.ref_name == github.event.repository.default_branch
+        # Release branches only — see the note at the top of this file. The
+        # default branch is read from the repository rather than hardcoded, so
+        # renaming or switching it can't silently re-open the hole; naming a
+        # second branch is deliberate, and it means a push there reaches phones
+        # directly, with CI compiling it but nothing else standing in between.
+        if: >-
+          github.ref_name == github.event.repository.default_branch ||
+          github.ref_name == env.RELEASE_BRANCH
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest-apk

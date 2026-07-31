@@ -4,6 +4,9 @@
     <string name="action_install_ubuntu">Install %1$s</string>
     <string name="action_install_desktop">Install %1$s desktop</string>
     <string name="de_title">Desktop environment</string>
+    <string name="gpu_title">Hardware GL (experimental)</string>
+    <string name="gpu_enable">Turn on</string>
+    <string name="gpu_disable">Turn off</string>
     <string name="de_selected_not_installed">selected — not installed yet</string>
     <string name="action_launch_desktop">Launch desktop</string>
     <string name="action_distributions">Distributions…</string>

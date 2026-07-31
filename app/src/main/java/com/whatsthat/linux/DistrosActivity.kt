@@ -119,6 +119,30 @@ class DistrosActivity : AppCompatActivity() {
         hint("Heavier desktops are marked, not hidden. If one fails to start, the " +
             "launch log says so and you can switch back immediately — nothing you " +
             "already installed is lost.")
+
+        gpuSection()
+    }
+
+    /**
+     * virgl is a rendering accelerator, not a display method — orthogonal to both
+     * the distro and the desktop, hence its own switch. Default off: it has not
+     * shown a perceptible gain on real hardware, and a misbehaving virgl makes GL
+     * clients abort instead of falling back to software, which a compositing
+     * desktop does not survive.
+     */
+    private fun gpuSection() {
+        header(getString(R.string.gpu_title), 22f, bold = true, topDp = 32f)
+        val on = env.gpuEnabled
+        hint("Currently: ${if (on) "ON — GL goes to the phone GPU" else "OFF — GL is rendered on the CPU"}.\n\n" +
+            "This only changes who draws inside the container; the picture still reaches " +
+            "the screen the same way. It can speed up 3D programs, but it has also been " +
+            "seen to make GL applications crash outright rather than run slowly — which " +
+            "can take a whole desktop session down with it. Leave it off unless you are " +
+            "testing it.")
+        list.addView(Button(this).apply {
+            text = if (on) getString(R.string.gpu_disable) else getString(R.string.gpu_enable)
+            setOnClickListener { env.gpuEnabled = !on; rebuild() }
+        })
     }
 
     private fun header(text: String, size: Float, bold: Boolean = false, topDp: Float = 0f) {

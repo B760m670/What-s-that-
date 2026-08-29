@@ -35,11 +35,73 @@ class LinuxEnvironment(context: Context) {
     // not found". Re-checking a real file makes the app reinstall cleanly.
     fun rootfsReady(d: Distro) =
         File(distroDir(d), ".bootstrap-done").exists() && File(distroDir(d), "usr/bin/env").exists()
-    // Desktop is ready if XFCE was installed on-device (Ubuntu/Debian) OR the
-    // distro is one of our pre-built images that bakes the marker (the Wine one).
+    // --- desktops --------------------------------------------------------------
+    //
+    // Which desktop and session type to use is remembered PER DISTRO, not once
+    // for the app: Ubuntu may be running GNOME while Debian stays on XFCE, and
+    // one global setting would silently change the other system every time the
+    // user switched distro.
+
+    fun desktopFor(d: Distro): DesktopEnv =
+        DesktopEnv.byId(prefs.getString("de:${d.id}", DesktopEnv.XFCE.id))
+
+    fun setDesktop(d: Distro, de: DesktopEnv) {
+        prefs.edit().putString("de:${d.id}", de.id).apply()
+    }
+
+    fun sessionTypeFor(d: Distro): SessionType =
+        SessionType.byId(prefs.getString("session:${d.id}", SessionType.X11.id))
+
+    fun setSessionType(d: Distro, t: SessionType) {
+        prefs.edit().putString("session:${d.id}", t.id).apply()
+    }
+
+    /**
+     * Whether [de] is present in [d]'s rootfs. Answered from the filesystem, not
+     * from a preference: a preference records what the user picked, which may be
+     * a desktop this particular system has never had installed.
+     */
+    fun desktopInstalled(d: Distro, de: DesktopEnv) =
+        File(distroDir(d), de.probeBinary).exists()
+
+    fun installedDesktops(d: Distro): List<DesktopEnv> =
+        DesktopEnv.all.filter { desktopInstalled(d, it) }
+
+    // Ready if ANY desktop was installed on-device, or the distro is one of our
+    // pre-built images that bakes the marker (the Wine one).
     fun desktopReady(d: Distro) =
-        File(distroDir(d), "usr/bin/startxfce4").exists() ||
+        installedDesktops(d).isNotEmpty() ||
         File(distroDir(d), "root/.wt-desktop-ready").exists()
+
+    /**
+     * PRETTY_NAME out of the installed rootfs, e.g. "Debian GNU/Linux 13
+     * (trixie)". Shown instead of a version baked into [Distros]: the constant
+     * says what a *fresh* install would download, while an existing rootfs is
+     * whatever it was when it was installed, and only the file knows which.
+     */
+    fun installedRelease(d: Distro): String? {
+        val f = File(distroDir(d), "etc/os-release")
+        if (!f.exists()) return null
+        return runCatching {
+            f.useLines { lines ->
+                lines.firstOrNull { it.startsWith("PRETTY_NAME=") }
+                    ?.substringAfter('=')?.trim('"', ' ')
+            }
+        }.getOrNull()
+    }
+
+    /**
+     * What the desktop session itself printed. start-desktop.sh redirects the
+     * session's output to a fixed path in the /tmp we bind, so this is readable
+     * straight off the app's own filesystem — no container needed, and no
+     * guessing at TigerVNC's log filename, which is how the last attempt at
+     * GNOME ended up with no diagnosis at all.
+     */
+    fun sessionLog(maxLines: Int = 200): List<String> {
+        val f = File(home, "tmp/wt-session.log")
+        if (!f.exists()) return emptyList()
+        return runCatching { f.readLines().takeLast(maxLines) }.getOrDefault(emptyList())
+    }
     fun removeDistro(d: Distro) {
         distroDir(d).deleteRecursively()
         invalidateDiskUsage(d)   // or the list would keep showing the size it no longer occupies
@@ -75,7 +137,16 @@ class LinuxEnvironment(context: Context) {
 
     /** State of the currently active distro (drives the main button). */
     val isBootstrapped: Boolean get() = rootfsReady(activeDistro)
-    val isDesktopInstalled: Boolean get() = desktopReady(activeDistro)
+
+    /**
+     * Whether the desktop the user has CHOSEN for the active distro is present.
+     * Deliberately not "any desktop": picking GNOME on a system that only has
+     * XFCE has to offer to install GNOME, not silently launch XFCE.
+     */
+    val isDesktopInstalled: Boolean
+        get() = activeDistro.let { d ->
+            desktopInstalled(d, desktopFor(d)) || File(distroDir(d), "root/.wt-desktop-ready").exists()
+        }
 
     /** Copy the bundled shell scripts out of the APK into a writable, exec dir. */
     fun prepareScripts() {
@@ -130,16 +201,27 @@ class LinuxEnvironment(context: Context) {
     fun installDesktop(onLog: (String) -> Unit, onProgress: (Progress) -> Unit = {}): Int =
         execScript(
             "install-desktop.sh", insideContainer = true,
-            extraEnv = mapOf(
-                "WT_PROFILE" to BuildConfig.DESKTOP_PROFILE,
-                "WT_PKG" to activeDistro.pkg.name.lowercase(),
-                "WT_DISTRO" to activeDistro.id,
-            ),
+            extraEnv = desktopEnvVars(),
             onLog = { line ->
                 parseStep(line)?.let(onProgress)
                 onLog(line)
             },
         )
+
+    /**
+     * The variables both container scripts need to know what to install and
+     * what to start. They must also be listed in run-in-ubuntu.sh's `env -i`
+     * whitelist, which is the one place a setting can vanish without a trace.
+     */
+    private fun desktopEnvVars(): Map<String, String> = activeDistro.let { d ->
+        mapOf(
+            "WT_PROFILE" to BuildConfig.DESKTOP_PROFILE,
+            "WT_PKG" to d.pkg.name.lowercase(),
+            "WT_DISTRO" to d.id,
+            "WT_DE" to desktopFor(d).id,
+            "WT_SESSION_TYPE" to sessionTypeFor(d).id,
+        )
+    }
 
     private fun parseStep(line: String): Progress? {
         val m = STEP_MARKER.find(line.trim()) ?: return null
@@ -155,7 +237,7 @@ class LinuxEnvironment(context: Context) {
     }
 
     /**
-     * Start the XFCE/VNC session and return the loopback "host:port" to connect
+     * Start the desktop session and return the loopback "host:port" to connect
      * to, or null on failure. The VNC server is a long-lived process, so we must
      * NOT wait for it to exit — we read its output only until it announces
      * VNC_READY, then leave it running in the background (a daemon thread keeps
@@ -164,7 +246,7 @@ class LinuxEnvironment(context: Context) {
     fun startDesktop(geometry: String, onLog: (String) -> Unit): String? {
         stopDesktop()
         val pb = ProcessBuilder(containerCommand("start-desktop.sh")).redirectErrorStream(true)
-        configureEnv(pb, mapOf("WT_GEOMETRY" to geometry))
+        configureEnv(pb, desktopEnvVars() + mapOf("WT_GEOMETRY" to geometry))
         val process = pb.start()
         desktopProcess = process
         val reader = process.inputStream.bufferedReader()

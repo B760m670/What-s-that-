@@ -44,6 +44,7 @@ class MainActivity : AppCompatActivity() {
         binding.actionButton.setOnClickListener { onAction() }
         binding.resumeButton.setOnClickListener { openViewer(env.sessionEndpoint) }
         binding.distrosButton.setOnClickListener { startActivity(Intent(this, DistrosActivity::class.java)) }
+        binding.desktopButton.setOnClickListener { chooseDesktop() }
         binding.resolutionButton.setOnClickListener { chooseResolution() }
         binding.runButton.setOnClickListener { runConsoleCommand() }
         binding.cmdInput.setOnEditorActionListener { _, _, _ -> runConsoleCommand(); true }
@@ -67,11 +68,15 @@ class MainActivity : AppCompatActivity() {
         binding.heroIcon.setImageResource(d.iconRes)
         binding.heroIcon.imageTintList = ColorStateList.valueOf(accent)
         binding.heroName.text = d.name
-        binding.heroSubtitle.text = d.tagline
+        // The installed rootfs, not the release Distros would download now: an
+        // older install stays exactly as it is, and saying otherwise would be a
+        // lie the user could act on.
+        binding.heroSubtitle.text = env.installedRelease(d) ?: d.tagline
 
+        val desktop = env.desktopFor(d)
         binding.actionButton.text = when {
             !env.isBootstrapped -> getString(R.string.action_install_ubuntu, d.name)
-            !env.isDesktopInstalled -> getString(R.string.action_install_desktop)
+            !env.isDesktopInstalled -> getString(R.string.action_install_desktop, desktop.name)
             else -> getString(R.string.action_launch_desktop)
         }
 
@@ -88,6 +93,14 @@ class MainActivity : AppCompatActivity() {
                 !installed -> addChip(getString(R.string.chip_not_installed), R.color.state_absent)
                 env.isDesktopInstalled -> addChip(getString(R.string.chip_desktop_ready), R.color.state_ready)
                 else -> addChip(getString(R.string.chip_no_desktop), R.color.state_partial)
+            }
+            if (installed) {
+                addChip(desktop.name, R.color.state_absent)
+                // Only GNOME has a choice to report; saying "X11 session" next to
+                // XFCE would imply an option that does not exist.
+                if (desktop.supportsWayland) {
+                    addChip(getString(R.string.chip_session, env.sessionTypeFor(d).label), R.color.state_absent)
+                }
             }
             if (running) addChip(getString(R.string.chip_session_running), R.color.state_ready)
             if (size > 0) addChip(LinuxEnvironment.formatBytes(size), R.color.state_absent)
@@ -145,10 +158,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showError(step: Step) {
-        val what = when (step) {
+        var what = when (step) {
             Step.BOOTSTRAP -> getString(R.string.err_bootstrap)
             Step.DESKTOP -> getString(R.string.err_desktop)
             Step.LAUNCH -> getString(R.string.err_launch)
+        }
+        // A desktop that starts and then dies — GNOME's fail whale is exactly
+        // that — leaves its reason in the session log and nowhere else. Copy it
+        // into the console so the answer is one tap away instead of nowhere.
+        if (step == Step.LAUNCH) {
+            val log = env.sessionLog(60)
+            if (log.isNotEmpty()) {
+                appendLog(getString(R.string.session_log_header))
+                log.forEach(::appendLog)
+                what += "\n\n" + getString(R.string.err_launch_logged)
+            }
         }
         AlertDialog.Builder(this)
             .setTitle(R.string.err_title)
@@ -180,6 +204,47 @@ class MainActivity : AppCompatActivity() {
     private var resolution: String
         get() = getSharedPreferences("wt", MODE_PRIVATE).getString("geometry", "1280x720") ?: "1280x720"
         set(v) { getSharedPreferences("wt", MODE_PRIVATE).edit().putString("geometry", v).apply() }
+
+    /**
+     * Which desktop this distro should run. Stored per distro, so choosing GNOME
+     * for Ubuntu leaves Debian on XFCE — and choosing one that is not installed
+     * here turns the main button into "Install GNOME" rather than silently
+     * launching the other one.
+     */
+    private fun chooseDesktop() {
+        val d = env.activeDistro
+        val options = DesktopEnv.all
+        val labels = options.map { de ->
+            val note = if (env.desktopInstalled(d, de)) getString(R.string.de_installed) else de.weight
+            getString(R.string.desktop_option, de.name, note)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.desktop_title, d.name))
+            .setSingleChoiceItems(labels.toTypedArray(), options.indexOf(env.desktopFor(d))) { dialog, which ->
+                val de = options[which]
+                env.setDesktop(d, de)
+                dialog.dismiss()
+                if (de.supportsWayland) chooseSessionType(d) else refreshState()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun chooseSessionType(d: Distro) {
+        val types = SessionType.entries.toTypedArray()
+        val labels = types.map {
+            getString(if (it == SessionType.X11) R.string.session_x11 else R.string.session_wayland)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.session_title)
+            .setSingleChoiceItems(labels.toTypedArray(), types.indexOf(env.sessionTypeFor(d))) { dialog, which ->
+                env.setSessionType(d, types[which])
+                dialog.dismiss()
+                refreshState()
+            }
+            .setNegativeButton(android.R.string.cancel) { _, _ -> refreshState() }
+            .show()
+    }
 
     private fun chooseResolution() {
         val current = resolutionOptions.indexOf(resolution).coerceAtLeast(0)

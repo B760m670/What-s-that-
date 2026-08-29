@@ -34,6 +34,13 @@ SHM_DIR="$WT_HOME/tmp/shm"
 mkdir -p "$SHM_DIR" 2>/dev/null || true
 chmod 1777 "$SHM_DIR" 2>/dev/null || true
 
+# NOTE: `env -i` below is a whitelist, and it is the single place where a
+# feature can die silently — a variable the app exports but does not list here
+# simply never reaches the guest, and the script inside reads its default
+# instead. WT_DISTRO and WT_PKG were in exactly that state: install-desktop.sh
+# has always read them, and they have never once arrived. Anything the app adds
+# must be added here too.
+#
 # proot flags (Termux proot):
 #   --link2symlink  emulate hardlinks as symlinks — ESSENTIAL: Android's app
 #                   filesystem refuses hardlinks, which breaks dpkg/apt (they
@@ -65,4 +72,8 @@ exec "$PROOT" \
         WT_PROFILE="${WT_PROFILE:-full}" \
         WT_VARIANT="${WT_VARIANT:-standard}" \
         WT_GEOMETRY="${WT_GEOMETRY:-1280x720}" \
+        WT_DISTRO="${WT_DISTRO:-}" \
+        WT_PKG="${WT_PKG:-apt}" \
+        WT_DE="${WT_DE:-xfce}" \
+        WT_SESSION_TYPE="${WT_SESSION_TYPE:-x11}" \
         "$@"

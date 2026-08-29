@@ -49,20 +49,30 @@ object Distros {
         }
 
     val all: List<Distro> = listOf(
+        // 24.04 rather than 22.04, and 13 rather than 12, for one reason: GNOME.
+        // Mutter's X11 backend was removed in GNOME 49, so these are the newest
+        // releases whose GNOME can still be driven through an X server at all —
+        // 24.04 carries GNOME 46, Debian 13 carries 48, and both keep both the
+        // X11 session and the nested-Wayland mode we launch it with.
+        //
+        // The rootfs directory is still keyed on the id, so an existing install
+        // is left exactly as it is; only a fresh install picks up the newer
+        // release. Nothing here is used for display — the version shown in the
+        // app is read back out of the installed rootfs, which cannot be wrong.
         Distro(
-            id = "ubuntu", name = "Ubuntu 22.04", pkg = PkgManager.APT,
+            id = "ubuntu", name = "Ubuntu", pkg = PkgManager.APT,
             resolveUrl = { arch, _ ->
-                "https://cloud-images.ubuntu.com/releases/22.04/release/" +
-                    "ubuntu-22.04-server-cloudimg-${debArch(arch)}-root.tar.xz"
+                "https://cloud-images.ubuntu.com/releases/24.04/release/" +
+                    "ubuntu-24.04-server-cloudimg-${debArch(arch)}-root.tar.xz"
             },
-            checksumUrl = { "https://cloud-images.ubuntu.com/releases/22.04/release/SHA256SUMS" },
+            checksumUrl = { "https://cloud-images.ubuntu.com/releases/24.04/release/SHA256SUMS" },
             iconRes = R.drawable.ic_distro_ubuntu,
             accentRes = R.color.accent_ubuntu,
             tagline = "Long-term support. The most familiar starting point.",
         ),
         Distro(
-            id = "debian", name = "Debian 12 (Bookworm)", pkg = PkgManager.APT,
-            resolveUrl = lxc("debian", "bookworm"),
+            id = "debian", name = "Debian", pkg = PkgManager.APT,
+            resolveUrl = lxc("debian", "trixie"),
             iconRes = R.drawable.ic_distro_debian,
             accentRes = R.color.accent_debian,
             tagline = "Stable and lean. Ships Firefox ESR as a real package.",

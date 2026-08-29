@@ -2,9 +2,9 @@
 <resources>
     <string name="app_name">What\'s that? — Linux</string>
     <string name="action_install_ubuntu">Install %1$s</string>
-    <string name="action_install_desktop">Install XFCE desktop</string>
+    <string name="action_install_desktop">Install %1$s</string>
     <string name="action_launch_desktop">Launch desktop</string>
-    <string name="action_distributions">Distributions…</string>
+    <string name="action_distributions">Systems</string>
     <string name="distros_title">Distributions</string>
     <string name="distros_hint">Each system installs separately and keeps its own files. Switching only changes which one the main screen installs and launches — nothing already installed is removed.</string>
     <string name="distro_active">active</string>
@@ -26,7 +26,7 @@
     <string name="status_arch">%1$s · %2$s · build %3$s</string>
     <string name="subtitle_build">%1$s · build %2$s</string>
     <string name="action_resume">Return to the running desktop</string>
-    <string name="action_resolution">Resolution</string>
+    <string name="action_resolution">Screen</string>
     <string name="chip_session_running">Session running</string>
     <string name="console_show">Show</string>
     <string name="console_hide">Hide</string>
@@ -59,4 +59,14 @@
     <string name="run">Run</string>
     <string name="show_keyboard">⌨</string>
     <string name="close_session">✕</string>
+    <string name="action_desktop">Desktop</string>
+    <string name="desktop_title">Desktop for %1$s</string>
+    <string name="desktop_option">%1$s — %2$s</string>
+    <string name="de_installed">installed</string>
+    <string name="session_title">How GNOME draws</string>
+    <string name="session_x11">X11 — one composite fewer, so faster here. GNOME deleted this mode upstream in version 49.</string>
+    <string name="session_wayland">Wayland — a real Wayland compositor, nested in the display. Costs an extra composite every frame.</string>
+    <string name="chip_session">%1$s session</string>
+    <string name="err_launch_logged">The session log has been added to the console below.</string>
+    <string name="session_log_header">— session log —</string>
 </resources>

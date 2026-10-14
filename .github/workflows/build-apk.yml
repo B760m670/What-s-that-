@@ -53,6 +53,12 @@ jobs:
           # already-built commit barely touches the network at all.
           cache: gradle
 
+      - name: Check the container scripts
+        # These run inside proot on a phone and cannot be executed here, so a
+        # broken one used to ship and fail on the device. `bash -n` proves a
+        # file parses; this proves the functions it says it needs exist.
+        run: python3 tools/check-scripts.py
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:

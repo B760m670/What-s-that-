@@ -160,6 +160,82 @@ EOF
     dconf update 2>/dev/null || echo "[desktop] dconf update failed — lock screen may be active."
 }
 
+WHALE=no
+
+# How many top-level windows are mapped on the display. This is the difference
+# between "the process exists" and "something was drawn": a shell can sit there
+# alive and map nothing, which from the sofa is indistinguishable from a crash —
+# a black screen. Needs x11-utils; when it is absent the count is reported as
+# unknown and the process check stands alone.
+mapped_windows() {
+    if ! have xwininfo; then echo unknown; return; fi
+    local out
+    out=$(xwininfo -root -children -display ":$DISPLAY_NUM" 2>/dev/null) || { echo unknown; return; }
+    echo "$out" | grep -cE '^ +0x[0-9a-f]+' || echo 0
+}
+
+# A desktop is "up" when its own process is running. gnome-session-failed is
+# GNOME's fail whale: it appears precisely when the shell has died, so finding
+# it is a definite failure rather than an absence of evidence.
+session_alive() {
+    local d c found=1
+    WHALE=no
+    for d in /proc/[0-9]*; do
+        [ -r "$d/cmdline" ] || continue
+        { c=$(<"$d/cmdline"); } 2>/dev/null || continue
+        case "$c" in
+            *gnome-session-failed*) WHALE=yes ;;
+            *gnome-shell*|*xfce4-session*|*openbox-session*) found=0 ;;
+        esac
+    done
+    return $found
+}
+
+# Wait for the session to appear AND still be there a moment later. Seen once is
+# not proof: a shell that crashes on startup exists for a second or two first,
+# and that is the exact case we are trying to tell apart.
+wait_for_session() {
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        sleep 2 || true
+        if [ "$WHALE" = yes ]; then return 1; fi
+        if session_alive; then
+            sleep 3 || true
+            session_alive || return 1
+            [ "$WHALE" = no ] || return 1
+            return 0
+        fi
+    done
+    return 1
+}
+
+teardown() {
+    vncserver -kill ":$DISPLAY_NUM" >/dev/null 2>&1 || true
+    sweep TERM
+    sleep 1 || true
+    sweep KILL
+    rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}" 2>/dev/null || true
+    rm -f "/root/.vnc/"*":${DISPLAY_NUM}.pid" 2>/dev/null || true
+}
+
+# Print what the session itself said. This runs on EVERY launch, not only on
+# failure. A session that starts, stays running and draws nothing is a failure
+# too — a black screen — and the first version printed nothing at all for it,
+# because it only spoke when the process was gone.
+report_session() {
+    if [ -r "$SESSION_LOG" ] && [ -s "$SESSION_LOG" ]; then
+        echo "=================== $SESSION_LOG ==================="
+        mapfile -t _lines < "$SESSION_LOG" 2>/dev/null || _lines=()
+        n=${#_lines[@]}
+        i=$((n > 80 ? n - 80 : 0))
+        while [ "$i" -lt "$n" ]; do echo "${_lines[$i]:0:200}"; i=$((i + 1)); done
+        echo "==================================================="
+    else
+        echo "[session] $SESSION_LOG is empty or missing — the session command"
+        echo "[session] did not get far enough to write to it."
+    fi
+}
+
 # gnome-shell dies without a SYSTEM D-Bus, and this is not a guess: its
 # _initializeUI builds an EndSessionDialog, that reaches for Gio.DBus.system,
 # and with no socket at /run/dbus/system_bus_socket the getter throws
@@ -389,6 +465,19 @@ if have pulseaudio; then
         listen=127.0.0.1 port=4712 format=s16le rate=48000 channels=2 >/dev/null 2>&1 || true
 fi
 }
+
+# Every function below this line is one the script cannot run without. The list
+# is checked at runtime, and tools/check-scripts.py checks it against what the
+# file actually defines — because an edit once removed four of these at once,
+# the file still parsed, CI stayed green, and the phone said
+# "wait_for_session: command not found" halfway through a launch.
+WT_REQUIRED_FUNCTIONS="read_field sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus attempt start_audio"
+for _f in $WT_REQUIRED_FUNCTIONS; do
+    if ! declare -F "$_f" >/dev/null; then
+        echo "[desktop] INTERNAL ERROR: this script is missing $_f. Not launching."
+        exit 1
+    fi
+done
 
 # Which session types to try, best guess first. For anything but GNOME there is
 # only one way to run it. For GNOME, whatever worked last time is tried first —

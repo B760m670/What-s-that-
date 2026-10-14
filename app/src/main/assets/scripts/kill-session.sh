@@ -66,6 +66,19 @@ sweep() {   # $1 = signal
     done
 }
 
+# Every function below this line is one the script cannot run without. The list
+# is checked at runtime, and tools/check-scripts.py checks it against what the
+# file actually defines — because an edit once removed four of these at once,
+# the file still parsed, CI stayed green, and the phone said
+# "wait_for_session: command not found" halfway through a launch.
+WT_REQUIRED_FUNCTIONS="read_field sweep"
+for _f in $WT_REQUIRED_FUNCTIONS; do
+    if ! declare -F "$_f" >/dev/null; then
+        echo "[desktop] INTERNAL ERROR: this script is missing $_f. Not launching."
+        exit 1
+    fi
+done
+
 # 1. Let TigerVNC take the session down its own way first: that runs the
 #    server's shutdown path and gives the desktop a chance to save state.
 vncserver -kill ":$DISPLAY_NUM" >/dev/null 2>&1 || true

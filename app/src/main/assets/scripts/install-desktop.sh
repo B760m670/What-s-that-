@@ -139,6 +139,17 @@ try_first() {
     return 1
 }
 
+# Every function this script cannot run without. Checked here and in
+# tools/check-scripts.py, so a function deleted by an edit is caught before the
+# script reaches a phone rather than halfway through an install.
+WT_REQUIRED_FUNCTIONS="step try_install try_first"
+for _f in $WT_REQUIRED_FUNCTIONS; do
+    if ! declare -F "$_f" >/dev/null; then
+        echo "[install] INTERNAL ERROR: this script is missing $_f. Stopping."
+        exit 1
+    fi
+done
+
 if [ "$DE" = "gnome" ]; then
     step "Installing GNOME"
     # The core the session cannot start without. gnome-shell pulls

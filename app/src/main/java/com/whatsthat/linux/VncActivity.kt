@@ -158,8 +158,6 @@ class VncActivity : AppCompatActivity() {
         }.apply { isDaemon = true; start() }
     }
 
-    private companion object { const val MAX_RECONNECTS = 8 }
-
     override fun onDestroy() {
         ui.removeCallbacksAndMessages(null)
         client?.stop()
@@ -170,6 +168,9 @@ class VncActivity : AppCompatActivity() {
     companion object {
         private const val EXTRA_HOST = "host"
         private const val EXTRA_PORT = "port"
+
+        /** Give up after this many, rather than retrying a dead socket forever. */
+        private const val MAX_RECONNECTS = 8
 
         fun start(context: Context, host: String, port: Int) {
             context.startActivity(Intent(context, VncActivity::class.java).apply {

@@ -102,6 +102,29 @@ class LinuxEnvironment(context: Context) {
         if (!f.exists()) return emptyList()
         return runCatching { f.readLines().takeLast(maxLines) }.getOrDefault(emptyList())
     }
+    /**
+     * Rootfs directories on disk that no longer belong to any offered distro.
+     *
+     * Dropping a distro from the list must not strand its gigabytes: the
+     * directory is keyed on the id, so a system installed when Debian was
+     * offered is still there, still occupying space, and with nothing in the
+     * interface able to reach it. Listing what is actually on disk — rather
+     * than a remembered list of ids — is the version that cannot go stale.
+     */
+    fun orphanedRootfs(): List<File> =
+        distrosDir.listFiles().orEmpty()
+            .filter { it.isDirectory && Distros.all.none { d -> d.id == it.name } }
+            .sortedBy { it.name }
+
+    fun removeOrphan(dir: File) {
+        dir.deleteRecursively()
+        invalidateDiskUsage()
+    }
+
+    /** Bytes used by any directory, for the orphan entries that have no [Distro]. */
+    fun diskUsageOf(dir: File): Long =
+        runCatching { dir.walkTopDown().filter { it.isFile }.sumOf { it.length() } }.getOrDefault(0L)
+
     fun removeDistro(d: Distro) {
         distroDir(d).deleteRecursively()
         invalidateDiskUsage(d)   // or the list would keep showing the size it no longer occupies

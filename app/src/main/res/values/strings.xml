@@ -69,4 +69,6 @@
     <string name="chip_session">%1$s session</string>
     <string name="err_launch_logged">The session log has been added to the console below.</string>
     <string name="session_log_header">— session log —</string>
+    <string name="orphan_tagline">Installed when this system was still offered. It can only be removed now.</string>
+    <string name="orphan_chip">No longer offered</string>
 </resources>

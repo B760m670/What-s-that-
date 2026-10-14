@@ -16,10 +16,13 @@
     android:orientation="vertical"
     android:fitsSystemWindows="true">
 
+    <!-- Height wraps rather than being pinned to actionBarSize: the subtitle is
+         a second line of text, and the fixed bar height cut it off. -->
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
-        android:layout_height="?attr/actionBarSize"
+        android:layout_height="wrap_content"
+        android:minHeight="?attr/actionBarSize"
         android:background="?attr/colorPrimary"
         app:title="@string/app_name"
         app:titleTextColor="?attr/colorOnPrimary"

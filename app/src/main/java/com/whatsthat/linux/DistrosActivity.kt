@@ -42,7 +42,56 @@ class DistrosActivity : AppCompatActivity() {
     private fun rebuild() {
         binding.distroList.removeAllViews()
         for (d in env.allDistros) addCard(d)
+        // Systems installed when more distros were offered are still on disk and
+        // still cost gigabytes. They get a card of their own so they can be
+        // removed; there is nothing else useful left to do with them.
+        for (dir in env.orphanedRootfs()) addOrphanCard(dir)
         updateStorageSummary()
+    }
+
+    private fun addOrphanCard(dir: java.io.File) {
+        val row = ItemDistroBinding.inflate(layoutInflater, binding.distroList, true)
+        val tint = color(R.color.state_absent)
+
+        row.distroIcon.setImageResource(R.drawable.ic_distro_debian)
+        row.distroIcon.imageTintList = ColorStateList.valueOf(tint)
+        row.distroName.text = dir.name.replaceFirstChar { it.uppercase() }
+        row.distroTagline.text = getString(R.string.orphan_tagline)
+        row.card.strokeColor = color(R.color.card_outline)
+        row.card.strokeWidth = 1
+
+        row.chips.removeAllViews()
+        row.chips.addView(chip(getString(R.string.orphan_chip), tint))
+        val sizeChip = chip(getString(R.string.chip_measuring), tint)
+        row.chips.addView(sizeChip)
+        lifecycleScope.launch {
+            val bytes = withContext(Dispatchers.IO) { env.diskUsageOf(dir) }
+            sizeChip.text = LinuxEnvironment.formatBytes(bytes)
+        }
+
+        row.actions.removeAllViews()
+        row.actions.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = getString(R.string.distro_remove)
+            setTextColor(color(R.color.state_partial))
+            setOnClickListener { confirmRemoveOrphan(dir) }
+        })
+    }
+
+    private fun confirmRemoveOrphan(dir: java.io.File) {
+        lifecycleScope.launch {
+            val size = withContext(Dispatchers.IO) { env.diskUsageOf(dir) }
+            AlertDialog.Builder(this@DistrosActivity)
+                .setTitle(getString(R.string.remove_title, dir.name))
+                .setMessage(getString(R.string.remove_message, LinuxEnvironment.formatBytes(size)))
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.distro_remove) { _, _ ->
+                    lifecycleScope.launch {
+                        withContext(Dispatchers.IO) { env.removeOrphan(dir) }
+                        rebuild()
+                    }
+                }
+                .show()
+        }
     }
 
     private fun addCard(d: Distro) {

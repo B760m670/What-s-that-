@@ -209,7 +209,25 @@ case "$DE" in
     gnome)
         if have gnome-session; then
             setup_gnome
-            SESSION_CMD="gnome-session --builtin --session=whatsthat"
+            # Ask the installed gnome-session which options it has rather than
+            # assuming. --builtin existed in GNOME 43 and was REMOVED by 46:
+            # passing it there is "Unknown option", exit 1, and a session that
+            # never starts — which is exactly how this failed the first time.
+            # It is not needed either, because gnome-session falls back to the
+            # non-systemd startup procedure on its own when systemd is absent.
+            GS_HELP=$(gnome-session --help-all 2>&1 || true)
+            GS_ARGS="--session=whatsthat"
+            case "$GS_HELP" in
+                *--builtin*) GS_ARGS="--builtin $GS_ARGS" ;;
+            esac
+            # Under llvmpipe the acceleration check is a pure liability: GNOME
+            # supports software rendering here, and a failed check only costs us
+            # a session.
+            case "$GS_HELP" in
+                *--disable-acceleration-check*) GS_ARGS="$GS_ARGS --disable-acceleration-check" ;;
+            esac
+            echo "[desktop] gnome-session $GS_ARGS"
+            SESSION_CMD="gnome-session $GS_ARGS"
         else
             # gnome-session-bin missing: the shell alone is still a usable
             # desktop (top bar, overview, app grid), just without the settings
@@ -271,6 +289,10 @@ mkdir -p /root/.vnc
     echo "exec > $SESSION_LOG 2>&1"
     echo 'unset SESSION_MANAGER'
     echo 'unset DBUS_SESSION_BUS_ADDRESS'
+    # /usr/bin/gnome-session re-execs itself through a login shell when
+    # XDG_SESSION_TYPE=wayland and SHELL is set. There is nothing to gain from
+    # that here and a whole environment to lose, so take the branch away.
+    echo 'unset SHELL'
     echo 'export HOME=/root'
     echo "export XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
     echo 'export XKL_XMODMAP_DISABLE=1'
@@ -297,14 +319,39 @@ mkdir -p /root/.vnc
 } > /root/.vnc/xstartup
 chmod +x /root/.vnc/xstartup
 
+# Print what the session itself said. This is the whole point of redirecting it
+# to a known path, and it has to run on BOTH paths: the first version let
+# `set -e` abort at a failing vncserver, so the one case that needed explaining
+# was the one case that explained nothing.
+report_session() {
+    if [ -r "$SESSION_LOG" ] && [ -s "$SESSION_LOG" ]; then
+        echo "=================== $SESSION_LOG ==================="
+        mapfile -t _lines < "$SESSION_LOG" 2>/dev/null || _lines=()
+        n=${#_lines[@]}
+        i=$((n > 40 ? n - 40 : 0))
+        while [ "$i" -lt "$n" ]; do echo "${_lines[$i]:0:200}"; i=$((i + 1)); done
+        echo "==================================================="
+    else
+        echo "[session] $SESSION_LOG is empty or missing — the session command"
+        echo "[session] did not even get far enough to write to it."
+    fi
+}
+
 echo "[desktop] Starting $DE ($SESSION_TYPE) on :$DISPLAY_NUM (${GEOMETRY})..."
 # -localhost: only the on-device app can reach it. SecurityTypes None because
 # the socket never leaves localhost inside the app sandbox.
+vnc_rc=0
 vncserver ":$DISPLAY_NUM" \
     -geometry "$GEOMETRY" \
     -depth "$DEPTH" \
     -localhost yes \
-    -SecurityTypes None
+    -SecurityTypes None || vnc_rc=$?
+
+if [ "$vnc_rc" != 0 ]; then
+    echo "[desktop] the VNC server could not bring the session up (exit $vnc_rc)."
+    report_session
+    exit "$vnc_rc"
+fi
 
 echo "[desktop] display is up."
 echo "VNC_READY 127.0.0.1:$PORT"
@@ -327,28 +374,6 @@ for d in /proc/[0-9]*; do
     esac
 done
 echo "[session] desktop process alive: $alive"
-
-if [ -r "$SESSION_LOG" ]; then
-    mapfile -t _lines < "$SESSION_LOG" 2>/dev/null || _lines=()
-    hits=0
-    for l in "${_lines[@]}"; do
-        case "$l" in
-            *"Oh no"*|*"has gone wrong"*|*"Unable to find required component"*|\
-            *"Failed to"*|*"failed to"*|*"cannot open"*|*"No such file"*|\
-            *"Segmentation"*|*"libGL error"*|*"EGL"*|*"Unable to init"*)
-                echo "[session]   ${l:0:170}"
-                hits=$((hits + 1))
-                if [ "$hits" -ge 12 ]; then break; fi ;;
-        esac
-    done
-    if [ "$hits" = 0 ]; then
-        echo "[session] no obvious errors; last lines of $SESSION_LOG:"
-        n=${#_lines[@]}
-        i=$((n > 6 ? n - 6 : 0))
-        while [ "$i" -lt "$n" ]; do echo "[session]   ${_lines[$i]:0:170}"; i=$((i + 1)); done
-    else
-        echo "[session] ^ the desktop session reported the above."
-    fi
-else
-    echo "[session] $SESSION_LOG was never created — the session did not start."
+if [ "$alive" = no ]; then
+    report_session
 fi

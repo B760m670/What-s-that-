@@ -26,7 +26,7 @@ class Distro(
 
 object Distros {
 
-    /** Map our canonical arch to the Ubuntu/Debian/LXC image arch. */
+    /** Map our canonical arch to the name the image server uses. */
     private fun debArch(arch: String) = when (arch) {
         "aarch64" -> "arm64"
         "arm" -> "armhf"
@@ -35,30 +35,26 @@ object Distros {
     }
 
     /**
-     * Resolve the newest build on the LXC image server, which carries rootfs
-     * tarballs for most distros in a uniform layout:
-     *   images/<distro>/<release>/<arch>/default/<YYYYMMDD_HH:MM>/rootfs.tar.xz
+     * One distribution, deliberately.
+     *
+     * Three were offered, which meant every change had to be right on three
+     * systems that name their packages, sessions and releases differently —
+     * GNOME alone is `gnome.session` on Debian and `ubuntu.session` on Ubuntu —
+     * and none of the three was getting the attention it needed. Ubuntu is the
+     * one most people mean, so it is the one that gets made to work properly.
+     *
+     * Rootfs directories are keyed on the id, so a system installed earlier
+     * under another id is still on disk; the Distributions screen lists those
+     * separately so their gigabytes can be reclaimed.
      */
-    private fun lxc(distro: String, release: String): (String, (String) -> String) -> String =
-        { arch, http ->
-            val base = "https://images.linuxcontainers.org/images/$distro/$release/${debArch(arch)}/default/"
-            val listing = http(base)
-            val ts = Regex("""\d{8}_\d{2}:\d{2}""").findAll(listing).map { it.value }.toList().maxOrNull()
-                ?: error("No LXC build found for $distro/$release/${debArch(arch)}")
-            "$base$ts/rootfs.tar.xz"
-        }
-
     val all: List<Distro> = listOf(
-        // 24.04 rather than 22.04, and 13 rather than 12, for one reason: GNOME.
-        // Mutter's X11 backend was removed in GNOME 49, so these are the newest
-        // releases whose GNOME can still be driven through an X server at all —
-        // 24.04 carries GNOME 46, Debian 13 carries 48, and both keep both the
-        // X11 session and the nested-Wayland mode we launch it with.
+        // 24.04 rather than 22.04 for one reason: GNOME. Mutter's X11 backend
+        // was removed in GNOME 49, so this is among the newest releases whose
+        // GNOME can still be driven through an X server at all — 24.04 carries
+        // GNOME 46, keeping both the X11 session and the nested-Wayland mode.
         //
-        // The rootfs directory is still keyed on the id, so an existing install
-        // is left exactly as it is; only a fresh install picks up the newer
-        // release. Nothing here is used for display — the version shown in the
-        // app is read back out of the installed rootfs, which cannot be wrong.
+        // Nothing here is used for display: the version shown in the app is
+        // read back out of the installed rootfs, which cannot be wrong.
         Distro(
             id = "ubuntu", name = "Ubuntu", pkg = PkgManager.APT,
             resolveUrl = { arch, _ ->
@@ -69,28 +65,6 @@ object Distros {
             iconRes = R.drawable.ic_distro_ubuntu,
             accentRes = R.color.accent_ubuntu,
             tagline = "Long-term support. The most familiar starting point.",
-        ),
-        Distro(
-            id = "debian", name = "Debian", pkg = PkgManager.APT,
-            resolveUrl = lxc("debian", "trixie"),
-            iconRes = R.drawable.ic_distro_debian,
-            accentRes = R.color.accent_debian,
-            tagline = "Stable and lean. Ships Firefox ESR as a real package.",
-        ),
-        // Our OWN pre-built image: Box64 + Wine + a light Openbox desktop baked
-        // in (built in CI). EXPERIMENTAL — on a Mali GPU only software rendering
-        // is available, so expect simple/old Windows programs, not games.
-        Distro(
-            id = "windows", name = "Windows apps (Wine) — experimental", pkg = PkgManager.APT,
-            resolveUrl = { arch, _ ->
-                if (arch == "aarch64")
-                    "https://github.com/B760m670/What-s-that-/releases/download/images/whatsthat-debian-wine-arm64.tar.xz"
-                else error("The Wine image is arm64-only for now")
-            },
-            experimental = true,
-            iconRes = R.drawable.ic_distro_wine,
-            accentRes = R.color.accent_wine,
-            tagline = "Debian with Box64 + Wine baked in, for Windows programs.",
         ),
     )
 

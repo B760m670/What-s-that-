@@ -264,14 +264,17 @@ report_session() {
 # those names having no owner. It cannot cope with there being no bus to ask.
 start_system_bus() {
     mkdir -p /run/dbus 2>/dev/null || true
-    rm -f /run/dbus/pid 2>/dev/null || true
-    if [ -S /run/dbus/system_bus_socket ]; then
-        echo "[desktop] system D-Bus already up."
-        return 0
-    fi
+
+    # Start a fresh one every time, and never take the socket's existence as
+    # proof that a bus is behind it. A unix socket outlives the process that
+    # made it, and the teardown between attempts kills our bus along with
+    # everything else — so the second attempt found the file, reported "already
+    # up", started nothing, and the shell got ECONNREFUSED instead of the
+    # ENOENT we had fixed. The file is a leftover, not a service.
+    rm -f /run/dbus/pid /run/dbus/system_bus_socket 2>/dev/null || true
 
     dbus-daemon --system --fork >/dev/null 2>/tmp/.wt-sysbus.err || true
-    if [ -S /run/dbus/system_bus_socket ]; then
+    if wait_for_socket /run/dbus/system_bus_socket && system_bus_answers; then
         echo "[desktop] system D-Bus started."
         return 0
     fi
@@ -302,12 +305,35 @@ start_system_bus() {
   <includedir>system.d</includedir>
 </busconfig>
 DBEOF
+    # Same reasoning as above: clear whatever the first attempt left behind, or
+    # the private bus cannot bind the address it is told to listen on.
+    rm -f /run/dbus/pid /run/dbus/system_bus_socket 2>/dev/null || true
     dbus-daemon --config-file=/etc/dbus-1/wt-system.conf --fork >/dev/null 2>&1 || true
-    if [ -S /run/dbus/system_bus_socket ]; then
+    if wait_for_socket /run/dbus/system_bus_socket && system_bus_answers; then
         echo "[desktop] private system D-Bus started."
     else
         echo "[desktop] no system D-Bus — GNOME will not start without one."
     fi
+}
+
+# Proof, not presence: ping the bus. "Connection refused" against a socket file
+# that nothing is listening on is precisely the failure this guards against, and
+# a file test cannot tell the two apart.
+system_bus_answers() {
+    have dbus-send || return 0   # cannot ask; do not fail on that alone
+    dbus-send --system --print-reply --dest=org.freedesktop.DBus \
+        / org.freedesktop.DBus.Peer.Ping >/dev/null 2>&1
+}
+
+# dbus-daemon --fork returns once it has daemonised, which is not quite the same
+# moment as the socket being there to connect to.
+wait_for_socket() {   # $1 = path
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        [ -S "$1" ] && return 0
+        sleep 0.2 2>/dev/null || sleep 1
+    done
+    [ -S "$1" ]
 }
 
 # One full attempt: configure, write xstartup, start the server, verify.
@@ -488,7 +514,7 @@ fi
 # file actually defines — because an edit once removed four of these at once,
 # the file still parsed, CI stayed green, and the phone said
 # "wait_for_session: command not found" halfway through a launch.
-WT_REQUIRED_FUNCTIONS="read_field sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus attempt start_audio"
+WT_REQUIRED_FUNCTIONS="read_field sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus system_bus_answers wait_for_socket attempt start_audio"
 for _f in $WT_REQUIRED_FUNCTIONS; do
     if ! declare -F "$_f" >/dev/null; then
         echo "[desktop] INTERNAL ERROR: this script is missing $_f. Not launching."

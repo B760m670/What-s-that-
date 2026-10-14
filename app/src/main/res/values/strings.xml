@@ -70,4 +70,6 @@
     <string name="orphan_chip">No longer offered</string>
     <string name="vnc_reconnecting">Connection lost (%3$s) — reconnecting, attempt %1$d of %2$d…</string>
     <string name="vnc_lost_for_good">Could not reconnect to the desktop: %1$s. The session may still be running — close this view and launch again.</string>
+    <string name="vnc_desktop_gone">The desktop stopped running</string>
+    <string name="vnc_gone_no_log">The X server left no message at all, which usually means it was killed rather than that it crashed — on a phone that is the system reclaiming memory.</string>
 </resources>

@@ -170,10 +170,18 @@ ensure_apt_lists() {
     return 1
 }
 
+# Names this release simply does not have. Remembered so a package that cannot
+# exist is not re-attempted on every single launch: libjxl-gdk-pixbuf is not
+# built for arm64 on 24.04, and asking apt again every time costs a round trip
+# and prints a line that looks like a new problem. Delete the file to retry.
+WT_UNAVAILABLE=/root/.wt-unavailable
+
 ensure_packages() {   # $@ = package names
     local p missing=""
     for p in "$@"; do
-        dpkg -s "$p" >/dev/null 2>&1 || missing="$missing $p"
+        dpkg -s "$p" >/dev/null 2>&1 && continue
+        grep -qxF "$p" "$WT_UNAVAILABLE" 2>/dev/null && continue
+        missing="$missing $p"
     done
     [ -n "$missing" ] || return 0
     ensure_apt_lists || return 0
@@ -184,7 +192,8 @@ ensure_packages() {   # $@ = package names
         if timeout 300 apt-get install -y --no-install-recommends "$p" >/dev/null 2>&1; then
             echo "[desktop]   + $p"
         else
-            echo "[desktop]   - $p unavailable — carrying on without it"
+            echo "[desktop]   - $p is not available on this release — noted, not retried"
+            echo "$p" >> "$WT_UNAVAILABLE"
         fi
     done
 }

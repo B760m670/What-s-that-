@@ -121,6 +121,22 @@ class LinuxEnvironment(context: Context) {
     }
 
     /**
+     * What TigerVNC's own log says, read straight off the rootfs.
+     *
+     * A session that disappears takes its explanation with it: the launch
+     * script has long exited, and the viewer only learns that the port refuses
+     * connections. The X server's log is still on disk, and it is the only
+     * place that distinguishes a crash from being killed — a process the kernel
+     * reaps for memory leaves no message at all, which is itself the answer.
+     */
+    fun vncServerLog(maxLines: Int = 40): List<String> {
+        val dir = File(distroDir(activeDistro), "root/.vnc")
+        val log = dir.listFiles { f -> f.name.endsWith(".log") }
+            ?.maxByOrNull { it.lastModified() } ?: return emptyList()
+        return runCatching { log.readLines().takeLast(maxLines) }.getOrDefault(emptyList())
+    }
+
+    /**
      * What the desktop session itself printed. start-desktop.sh redirects the
      * session's output to a fixed path in the /tmp we bind, so this is readable
      * straight off the app's own filesystem — no container needed, and no

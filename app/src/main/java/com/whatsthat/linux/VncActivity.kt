@@ -103,6 +103,16 @@ class VncActivity : AppCompatActivity() {
     private fun lost(host: String, port: Int, msg: String) {
         if (closing || isFinishing) return
         attempt++
+
+        // ECONNREFUSED means nothing is listening: the X server itself is gone,
+        // not merely unreachable. Retrying a port that refuses connections eight
+        // times over tells the user nothing they cannot already see, so stop and
+        // show what the server said on its way out.
+        if (msg.contains("ECONNREFUSED") || msg.contains("Connection refused")) {
+            showGone(msg)
+            return
+        }
+
         if (attempt > MAX_RECONNECTS) {
             status.text = getString(R.string.vnc_lost_for_good, msg)
             status.visibility = View.VISIBLE
@@ -154,6 +164,33 @@ class VncActivity : AppCompatActivity() {
             runOnUiThread {
                 runCatching { stopService(Intent(this, LinuxSessionService::class.java)) }
                 finish()
+            }
+        }.apply { isDaemon = true; start() }
+    }
+
+    /**
+     * The desktop stopped. Say so once, with whatever the X server managed to
+     * write before it went — including the silence that means it was killed
+     * rather than crashed.
+     */
+    private fun showGone(msg: String) {
+        if (closing || isFinishing) return
+        status.text = getString(R.string.vnc_desktop_gone)
+        status.visibility = View.VISIBLE
+        Thread {
+            val tail = runCatching { env.vncServerLog() }.getOrDefault(emptyList())
+            val detail = if (tail.isEmpty())
+                getString(R.string.vnc_gone_no_log)
+            else
+                tail.joinToString("\n")
+            runOnUiThread {
+                if (closing || isFinishing) return@runOnUiThread
+                androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle(R.string.vnc_desktop_gone)
+                    .setMessage("$msg\n\n$detail")
+                    .setPositiveButton(android.R.string.ok) { _, _ -> finish() }
+                    .setCancelable(true)
+                    .show()
             }
         }.apply { isDaemon = true; start() }
     }

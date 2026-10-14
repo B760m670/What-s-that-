@@ -154,12 +154,29 @@ fi
 # at launch is a one-off: once present, dpkg answers instantly and nothing
 # happens. Failure is never fatal — the desktop starts either way, just with
 # whatever that package would have provided missing.
+# The desktop install ends with `rm -rf /var/lib/apt/lists/*` to save a few
+# hundred megabytes, which leaves apt knowing about no packages at all. Every
+# later install then fails with "Unable to locate package" — for real packages,
+# from main — and the reason is invisible unless you know the lists are gone.
+ensure_apt_lists() {
+    if ls /var/lib/apt/lists/*_Packages* >/dev/null 2>&1; then
+        return 0
+    fi
+    echo "[desktop] refreshing package lists (the install clears them)..."
+    if timeout 300 apt-get update >/dev/null 2>&1; then
+        return 0
+    fi
+    echo "[desktop] apt update failed — nothing can be added until it works."
+    return 1
+}
+
 ensure_packages() {   # $@ = package names
     local p missing=""
     for p in "$@"; do
         dpkg -s "$p" >/dev/null 2>&1 || missing="$missing $p"
     done
     [ -n "$missing" ] || return 0
+    ensure_apt_lists || return 0
     echo "[desktop] fetching$missing (one-off)..."
     # One at a time: a name that does not exist on this release would otherwise
     # fail the whole transaction and take the packages that DO exist with it.
@@ -181,6 +198,7 @@ ensure_firefox() {
     dpkg -s firefox >/dev/null 2>&1 && return 0
     [ "$DISTRO_ID" = "ubuntu" ] || return 0
 
+    ensure_apt_lists || return 0
     echo "[desktop] installing Firefox from Mozilla's repository (one-off, ~290 MB)..."
     mkdir -p /etc/apt/keyrings
     if ! curl -fsSL --max-time 60 \
@@ -341,6 +359,21 @@ EOF
     fi
 
     dconf update 2>/dev/null || echo "[desktop] dconf update failed — lock screen may be active."
+
+    # dpkg's triggers do not always get to run under proot, and a stale icon
+    # cache is exactly why every entry in the dash can come up wearing the same
+    # generic icon. Rebuilding is cheap and idempotent.
+    local d
+    if have gtk-update-icon-cache; then
+        for d in /usr/share/icons/*/; do
+            [ -f "$d/index.theme" ] || continue
+            # Only when there is no cache at all: rebuilding Adwaita on every
+            # launch would cost seconds for nothing.
+            [ -f "$d/icon-theme.cache" ] && continue
+            gtk-update-icon-cache -q -f "$d" 2>/dev/null || true
+        done
+    fi
+    have update-desktop-database && update-desktop-database /usr/share/applications 2>/dev/null || true
 
     # Android hands the app a set of supplementary groups (inet, sdcard_rw and
     # friends) and proot passes them straight through, so every shell greets you
@@ -713,7 +746,7 @@ fi
 # file actually defines — because an edit once removed four of these at once,
 # the file still parsed, CI stayed green, and the phone said
 # "wait_for_session: command not found" halfway through a launch.
-WT_REQUIRED_FUNCTIONS="read_field ensure_packages ensure_firefox sweep_orphans sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus system_bus_answers wait_for_socket attempt start_audio"
+WT_REQUIRED_FUNCTIONS="read_field ensure_apt_lists ensure_packages ensure_firefox sweep_orphans sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus system_bus_answers wait_for_socket attempt start_audio"
 for _f in $WT_REQUIRED_FUNCTIONS; do
     if ! declare -F "$_f" >/dev/null; then
         echo "[desktop] INTERNAL ERROR: this script is missing $_f. Not launching."

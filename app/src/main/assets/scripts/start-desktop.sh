@@ -126,65 +126,13 @@ fi
 
 echo "[desktop] desktop: $DE"
 
-# --- GNOME: our own session definition ---------------------------------------
+# --- GNOME: settings that must be true before the first frame -----------------
 #
-# The stock gnome.session (and Ubuntu's ubuntu.session) lists seventeen
-# RequiredComponents: the shell plus every gnome-settings-daemon plugin. In
-# gnome-session, "required" is literal — `Unable to find required component`
-# ends the session, and that is the "Oh no! Something has gone wrong" screen.
-# Several of those plugins cannot work here at all: Power wants upower and
-# logind, UsbProtection wants logind, Rfkill wants a radio, Smartcard wants
-# pcscd. Under proot the stock session is therefore guaranteed to fail, and
-# that is why the previous attempt at GNOME never showed a desktop.
-#
-# So we ship our own session with exactly one required component — the shell —
-# and let the settings daemons come up through the ordinary XDG autostart
-# directory, where a failure is not fatal. This also makes the launch identical
-# on Debian and Ubuntu, which name and configure their stock sessions
-# differently (gnome vs ubuntu, the latter also needing
-# GNOME_SHELL_SESSION_MODE=ubuntu).
+# No session definition any more. We used to ship a .session file with a single
+# required component, to keep gnome-session away from the stock list of
+# seventeen; that was a real problem but not the last one, and running the shell
+# directly (see attempt()) removes gnome-session from the picture entirely.
 setup_gnome() {   # $1 = session type
-    local args=""
-    if [ "$1" = "wayland" ]; then args=" --wayland --nested"; fi
-
-    mkdir -p /usr/share/gnome-session/sessions /usr/share/applications
-    cat > /usr/share/gnome-session/sessions/whatsthat.session <<EOF
-[GNOME Session]
-Name=GNOME
-RequiredComponents=whatsthat-shell;
-DesktopName=GNOME
-EOF
-
-    # Mirrors GNOME's own org.gnome.Shell.desktop; only Exec differs. The
-    # DisplayServer phase is what makes the rest of the session wait for the
-    # compositor and pick up WAYLAND_DISPLAY from it.
-    cat > /usr/share/applications/whatsthat-shell.desktop <<EOF
-[Desktop Entry]
-Type=Application
-Name=GNOME Shell
-Exec=/usr/bin/gnome-shell$args
-NoDisplay=true
-OnlyShowIn=GNOME;
-X-GNOME-Autostart-Phase=DisplayServer
-X-GNOME-Provides=panel;windowmanager;
-X-GNOME-Autostart-Notify=true
-X-GNOME-AutoRestart=false
-EOF
-
-    # Mask the settings-daemon plugins that cannot work without logind, upower
-    # or real hardware. They would not kill the session from autostart, but they
-    # retry, log and cost startup time on a phone that has none of it.
-    mkdir -p /root/.config/autostart
-    for p in Power Rfkill Smartcard UsbProtection Sharing Wacom Wwan \
-             PrintNotifications ScreensaverProxy Color; do
-        cat > "/root/.config/autostart/org.gnome.SettingsDaemon.$p.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=$p (disabled here)
-Hidden=true
-EOF
-    done
-
     # Settings that must hold before the first frame, so they go into a system
     # dconf database: setting them with gsettings would need a session bus that
     # does not exist yet, while dconf update needs nothing at all.
@@ -210,91 +158,6 @@ enable-animations=false
 check-alive-timeout=uint32 60000
 EOF
     dconf update 2>/dev/null || echo "[desktop] dconf update failed — lock screen may be active."
-}
-
-
-# --- bringing a session up, and proving it stayed up -------------------------
-#
-# There used to be a setting asking the user to choose between X11 and nested
-# Wayland. That was the wrong question to ask anyone: there is no way for a
-# person to know which of the two their phone, their GNOME version and proot
-# will tolerate, and being asked made them responsible for an answer only an
-# attempt can give. So the app tries, checks, and falls back.
-
-WHALE=no
-
-# How many top-level windows are mapped on the display. This is the difference
-# between "the process exists" and "something was drawn": a shell can sit there
-# alive and map nothing, which from the sofa is indistinguishable from a crash —
-# a black screen. Needs x11-utils; when it is absent the count is reported as
-# unknown and the process check stands alone.
-mapped_windows() {
-    if ! have xwininfo; then echo unknown; return; fi
-    local out
-    out=$(xwininfo -root -children -display ":$DISPLAY_NUM" 2>/dev/null) || { echo unknown; return; }
-    echo "$out" | grep -cE '^ +0x[0-9a-f]+' || echo 0
-}
-
-# A desktop is "up" when its own process is running. gnome-session-failed is
-# GNOME's fail whale: it appears precisely when the shell has died, so finding
-# it is a definite failure rather than an absence of evidence.
-session_alive() {
-    local d c found=1
-    WHALE=no
-    for d in /proc/[0-9]*; do
-        [ -r "$d/cmdline" ] || continue
-        { c=$(<"$d/cmdline"); } 2>/dev/null || continue
-        case "$c" in
-            *gnome-session-failed*) WHALE=yes ;;
-            *gnome-shell*|*xfce4-session*|*openbox-session*) found=0 ;;
-        esac
-    done
-    return $found
-}
-
-# Wait for the session to appear AND still be there a moment later. Seen once is
-# not proof: a shell that crashes on startup exists for a second or two first,
-# and that is the exact case we are trying to tell apart.
-wait_for_session() {
-    local i
-    for i in 1 2 3 4 5 6 7 8 9 10; do
-        sleep 2 || true
-        if [ "$WHALE" = yes ]; then return 1; fi
-        if session_alive; then
-            sleep 3 || true
-            session_alive || return 1
-            [ "$WHALE" = no ] || return 1
-            return 0
-        fi
-    done
-    return 1
-}
-
-teardown() {
-    vncserver -kill ":$DISPLAY_NUM" >/dev/null 2>&1 || true
-    sweep TERM
-    sleep 1 || true
-    sweep KILL
-    rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}" 2>/dev/null || true
-    rm -f "/root/.vnc/"*":${DISPLAY_NUM}.pid" 2>/dev/null || true
-}
-
-# Print what the session itself said. This runs on EVERY launch, not only on
-# failure. A session that starts, stays running and draws nothing is a failure
-# too — a black screen — and the first version printed nothing at all for it,
-# because it only spoke when the process was gone.
-report_session() {
-    if [ -r "$SESSION_LOG" ] && [ -s "$SESSION_LOG" ]; then
-        echo "=================== $SESSION_LOG ==================="
-        mapfile -t _lines < "$SESSION_LOG" 2>/dev/null || _lines=()
-        n=${#_lines[@]}
-        i=$((n > 80 ? n - 80 : 0))
-        while [ "$i" -lt "$n" ]; do echo "${_lines[$i]:0:200}"; i=$((i + 1)); done
-        echo "==================================================="
-    else
-        echo "[session] $SESSION_LOG is empty or missing — the session command"
-        echo "[session] did not get far enough to write to it."
-    fi
 }
 
 # gnome-shell dies without a SYSTEM D-Bus, and this is not a guess: its
@@ -361,32 +224,34 @@ DBEOF
 # One full attempt: configure, write xstartup, start the server, verify.
 # Returns 0 only if a desktop is actually running at the end of it.
 attempt() {   # $1 = session type (x11|wayland)
-    local stype="$1" session_cmd session_env="" gs_help gs_args
+    local stype="$1" session_cmd session_env=""
 
     case "$DE" in
         gnome)
-            if have gnome-session; then
-                setup_gnome "$stype"
-                # Ask the installed gnome-session what options it has rather than
-                # assuming. --builtin existed in GNOME 43 and was REMOVED by 46:
-                # passing it there is "Unknown option", exit 1, and a session that
-                # never starts. It is not needed either — gnome-session falls back
-                # to the non-systemd startup procedure on its own.
-                gs_help=$(gnome-session --help-all 2>&1 || true)
-                gs_args="--session=whatsthat"
-                case "$gs_help" in *--builtin*) gs_args="--builtin $gs_args" ;; esac
-                # Under llvmpipe the acceleration check is a pure liability:
-                # GNOME supports software rendering here, and a failed check can
-                # only cost us the session.
-                case "$gs_help" in
-                    *--disable-acceleration-check*) gs_args="$gs_args --disable-acceleration-check" ;;
-                esac
-                session_cmd="gnome-session $gs_args"
-            else
-                echo "[desktop] gnome-session is missing — starting the shell on its own."
-                session_cmd="gnome-shell"
-                if [ "$stype" = "wayland" ]; then session_cmd="gnome-shell --wayland --nested"; fi
-            fi
+            setup_gnome "$stype"
+            # The shell is started DIRECTLY, without gnome-session, and that is
+            # not a simplification — it is the fix for the fail whale.
+            #
+            # gnome-session watches its children with g_child_watch_source_new().
+            # GLib 2.80 implements that with pidfd_open() + waitid(P_PIDFD, ...),
+            # which under proot returns EINVAL, and glib/gmain.c:5802 reacts like
+            # this:
+            #
+            #     g_warning (... "waitid(pid:%d, pidfd=%d) failed: ...");
+            #     /* Assume the process is gone and proceed. */
+            #     child_exited = TRUE;
+            #
+            # So GLib reports living children as dead. gnome-session is then told
+            # its required component has exited, concludes the session has failed
+            # and tears it down — "Oh no! Something has gone wrong". Nothing was
+            # actually wrong with GNOME; the session manager was being lied to
+            # about its own children.
+            #
+            # Running the shell directly removes the watcher, and with it the
+            # entire class of failure. What we give up is gnome-session's
+            # autostart and logout handling, neither of which works here anyway.
+            session_cmd="gnome-shell"
+            if [ "$stype" = "wayland" ]; then session_cmd="gnome-shell --wayland --nested"; fi
             session_env="XDG_CURRENT_DESKTOP=GNOME"
             ;;
         xfce)    session_cmd="startxfce4" ;;
@@ -395,7 +260,12 @@ attempt() {   # $1 = session type (x11|wayland)
     esac
 
     rm -f "$SESSION_LOG" 2>/dev/null || true
+    # gnome-shell writes this marker at startup and removes it on a clean exit;
+    # finding it there disables every extension on the next run. A session we
+    # killed never got to remove it.
+    rm -f "$XDG_RUNTIME_DIR/gnome-shell-disable-extensions" 2>/dev/null || true
     start_system_bus
+    start_audio
 
     # Regenerated every launch so fixes reach an installed system without
     # reinstalling it. Everything the session prints goes to one fixed path in
@@ -411,9 +281,9 @@ attempt() {   # $1 = session type (x11|wayland)
         echo "exec > $SESSION_LOG 2>&1"
         echo 'unset SESSION_MANAGER'
         echo 'unset DBUS_SESSION_BUS_ADDRESS'
-        # /usr/bin/gnome-session re-execs itself through a login shell when
-        # XDG_SESSION_TYPE=wayland and SHELL is set. Nothing to gain, a whole
-        # environment to lose.
+        # Several GNOME wrappers re-exec themselves through a login shell when
+        # XDG_SESSION_TYPE=wayland and SHELL is set. Nothing to gain here, a
+        # whole environment to lose.
         echo 'unset SHELL'
         echo 'export HOME=/root'
         echo "export XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
@@ -437,7 +307,16 @@ attempt() {   # $1 = session type (x11|wayland)
         else
             echo 'export XDG_SESSION_TYPE=x11'
         fi
-        echo "exec $dbus_wrapper $session_cmd"
+        if [ "$DE" = "gnome" ]; then
+            # Without gnome-session nothing starts the settings daemons. This is
+            # the only one worth having: it is what gives GTK applications their
+            # theme, fonts and scaling. It has to run INSIDE the session bus, so
+            # it goes after the dbus wrapper, not before it — and backgrounded
+            # and unwatched, so it cannot take the session with it if it fails.
+            echo "exec $dbus_wrapper bash -c '[ -x /usr/libexec/gsd-xsettings ] && /usr/libexec/gsd-xsettings & exec $session_cmd'"
+        else
+            echo "exec $dbus_wrapper $session_cmd"
+        fi
     } > /root/.vnc/xstartup
     chmod +x /root/.vnc/xstartup
 
@@ -493,7 +372,11 @@ fi
 # The container can't reach the speaker directly. Run PulseAudio here, route
 # everything to a null sink, and stream that sink's PCM over loopback TCP
 # (s16le/48k/stereo) — the app's AudioBridge reads 127.0.0.1:4712 and plays it.
-# Done once, before any attempt: it is independent of how the desktop draws.
+#
+# Per attempt, not once: the teardown between attempts reaps every process in
+# the container, PulseAudio included, and a second attempt without this got
+# "pa_context_connect() failed: Connection refused".
+start_audio() {
 if have pulseaudio; then
     pulseaudio --kill >/dev/null 2>&1 || true
     sleep 1 || true
@@ -505,6 +388,7 @@ if have pulseaudio; then
     pactl load-module module-simple-protocol-tcp record=true source=wt.monitor \
         listen=127.0.0.1 port=4712 format=s16le rate=48000 channels=2 >/dev/null 2>&1 || true
 fi
+}
 
 # Which session types to try, best guess first. For anything but GNOME there is
 # only one way to run it. For GNOME, whatever worked last time is tried first —

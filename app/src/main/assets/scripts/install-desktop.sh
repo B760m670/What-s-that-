@@ -184,6 +184,13 @@ if [ "$DE" = "gnome" ]; then
         echo "[install]   ! no terminal emulator available"
     try_first loupe eog gnome-photos || \
         echo "[install]   ! no image viewer available"
+
+    # What makes an Ubuntu desktop look like one: the Yaru theme, the dock
+    # extension and the wallpapers. Ordinary packages — none of them needs
+    # systemd — unlike the ubuntu-desktop metapackage, which would drag in gdm3
+    # and a pile of services that cannot run under proot.
+    try_install yaru-theme-gtk yaru-theme-icon ubuntu-wallpapers fonts-ubuntu \
+                gnome-shell-extension-ubuntu-dock || true
 elif [ "$PROFILE" = "lite" ]; then
     step "Installing the lite desktop"
     apt-get install -y --no-install-recommends \

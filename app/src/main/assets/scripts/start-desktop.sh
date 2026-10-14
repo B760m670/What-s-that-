@@ -154,9 +154,15 @@ ensure_packages() {   # $@ = package names
     done
     [ -n "$missing" ] || return 0
     echo "[desktop] fetching$missing (one-off)..."
-    # shellcheck disable=SC2086
-    timeout 180 apt-get install -y --no-install-recommends $missing >/dev/null 2>&1 || \
-        echo "[desktop] could not fetch$missing — carrying on without."
+    # One at a time: a name that does not exist on this release would otherwise
+    # fail the whole transaction and take the packages that DO exist with it.
+    for p in $missing; do
+        if timeout 300 apt-get install -y --no-install-recommends "$p" >/dev/null 2>&1; then
+            echo "[desktop]   + $p"
+        else
+            echo "[desktop]   - $p unavailable — carrying on without it"
+        fi
+    done
 }
 
 #   x11-utils          xwininfo, which is how we tell a drawn desktop from a
@@ -166,7 +172,14 @@ ensure_packages() {   # $@ = package names
 #                      and you get a flat colour instead of a desktop.
 ensure_packages x11-utils
 if [ "$DE" = "gnome" ]; then
-    ensure_packages libjxl-gdk-pixbuf
+    # Stock GNOME is not what people picture when they say "Ubuntu desktop".
+    # The orange-and-sage theme, the dock down the side and the purple
+    # wallpaper are the Yaru theme, a shell extension and a wallpaper package —
+    # ordinary packages, none of which needs systemd. What we keep avoiding is
+    # the ubuntu-desktop metapackage, which drags in gdm3 and a pile of
+    # services that cannot run here.
+    ensure_packages libjxl-gdk-pixbuf yaru-theme-gtk yaru-theme-icon \
+                    gnome-shell-extension-ubuntu-dock ubuntu-wallpapers fonts-ubuntu
 fi
 
 echo "[desktop] desktop: $DE"
@@ -184,8 +197,7 @@ setup_gnome() {   # $1 = session type
     #
     # The lock screen is not a preference here, it is a trap: unlocking goes
     # through logind, which does not exist, so a session that locks itself can
-    # never be unlocked. Animations are off because every frame of them is drawn
-    # by llvmpipe on the CPU and then re-encoded by the VNC server.
+    # never be unlocked.
     #
     # Tracker is told to index nothing. On a phone it would crawl the whole
     # rootfs for a search feature nobody opened, on a CPU that is already
@@ -202,9 +214,6 @@ idle-activation-enabled=false
 
 [org/gnome/desktop/session]
 idle-delay=uint32 0
-
-[org/gnome/desktop/interface]
-enable-animations=false
 
 [org/gnome/mutter]
 check-alive-timeout=uint32 60000
@@ -227,12 +236,53 @@ EOF
             favs="$favs${favs:+, }'$id.desktop'"
         fi
     done
-    if [ -n "$favs" ]; then
-        cat >> /etc/dconf/db/local.d/00-whatsthat <<EOF
+    # Extensions are listed only if they are really installed: naming one that
+    # is not there is how a shell ends up with a broken-looking desktop.
+    local exts="" uuid
+    for uuid in ubuntu-dock@ubuntu.com ding@rastersoft.com; do
+        if [ -d "/usr/share/gnome-shell/extensions/$uuid" ]; then
+            exts="$exts${exts:+, }'$uuid'"
+        fi
+    done
 
-[org/gnome/shell]
-favorite-apps=[$favs]
-EOF
+    {
+        echo
+        echo "[org/gnome/shell]"
+        [ -n "$favs" ] && echo "favorite-apps=[$favs]"
+        if [ -n "$exts" ]; then
+            echo "disable-user-extensions=false"
+            echo "enabled-extensions=[$exts]"
+        fi
+    } >> /etc/dconf/db/local.d/00-whatsthat
+
+    # One [org/gnome/desktop/interface] group, written once. A key file may not
+    # repeat a group name — dconf rejects the whole database if it does — and
+    # animations and the theme both live in this one.
+    #
+    # Animations are off because every frame of them is drawn by llvmpipe on the
+    # CPU and then re-encoded by the VNC server. Yaru is what makes Ubuntu look
+    # like Ubuntu, and is applied only when it is actually installed: a system
+    # without it keeps the perfectly good Adwaita default rather than pointing
+    # at a theme that is not there.
+    {
+        echo
+        echo "[org/gnome/desktop/interface]"
+        echo "enable-animations=false"
+        [ -d /usr/share/themes/Yaru ] && echo "gtk-theme='Yaru'"
+        [ -d /usr/share/icons/Yaru ] && echo "icon-theme='Yaru'"
+    } >> /etc/dconf/db/local.d/00-whatsthat
+
+    local wall
+    wall=$(ls /usr/share/backgrounds/warty-final-ubuntu.png \
+              /usr/share/backgrounds/*.png /usr/share/backgrounds/*.jpg \
+              2>/dev/null | head -1)
+    if [ -n "$wall" ]; then
+        {
+            echo
+            echo "[org/gnome/desktop/background]"
+            echo "picture-uri='file://$wall'"
+            echo "picture-uri-dark='file://$wall'"
+        } >> /etc/dconf/db/local.d/00-whatsthat
     fi
 
     dconf update 2>/dev/null || echo "[desktop] dconf update failed — lock screen may be active."

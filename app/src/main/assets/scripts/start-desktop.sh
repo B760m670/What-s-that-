@@ -135,9 +135,9 @@ echo "[desktop] desktop: $DE  session: $SESSION_TYPE"
 # on Debian and Ubuntu, which name and configure their stock sessions
 # differently (gnome vs ubuntu, the latter also needing
 # GNOME_SHELL_SESSION_MODE=ubuntu).
-setup_gnome() {
+setup_gnome() {   # $1 = session type
     local args=""
-    if [ "$SESSION_TYPE" = "wayland" ]; then args=" --wayland --nested"; fi
+    if [ "$1" = "wayland" ]; then args=" --wayland --nested"; fi
 
     mkdir -p /usr/share/gnome-session/sessions /usr/share/applications
     cat > /usr/share/gnome-session/sessions/whatsthat.session <<EOF
@@ -204,62 +204,204 @@ EOF
     dconf update 2>/dev/null || echo "[desktop] dconf update failed — lock screen may be active."
 }
 
-SESSION_ENV=""
-case "$DE" in
-    gnome)
-        if have gnome-session; then
-            setup_gnome
-            # Ask the installed gnome-session which options it has rather than
-            # assuming. --builtin existed in GNOME 43 and was REMOVED by 46:
-            # passing it there is "Unknown option", exit 1, and a session that
-            # never starts — which is exactly how this failed the first time.
-            # It is not needed either, because gnome-session falls back to the
-            # non-systemd startup procedure on its own when systemd is absent.
-            GS_HELP=$(gnome-session --help-all 2>&1 || true)
-            GS_ARGS="--session=whatsthat"
-            case "$GS_HELP" in
-                *--builtin*) GS_ARGS="--builtin $GS_ARGS" ;;
-            esac
-            # Under llvmpipe the acceleration check is a pure liability: GNOME
-            # supports software rendering here, and a failed check only costs us
-            # a session.
-            case "$GS_HELP" in
-                *--disable-acceleration-check*) GS_ARGS="$GS_ARGS --disable-acceleration-check" ;;
-            esac
-            echo "[desktop] gnome-session $GS_ARGS"
-            SESSION_CMD="gnome-session $GS_ARGS"
-        else
-            # gnome-session-bin missing: the shell alone is still a usable
-            # desktop (top bar, overview, app grid), just without the settings
-            # daemons. Better than refusing to start.
-            echo "[desktop] gnome-session is missing — starting the shell on its own."
-            SESSION_CMD="gnome-shell"
-            if [ "$SESSION_TYPE" = "wayland" ]; then
-                SESSION_CMD="gnome-shell --wayland --nested"
-            fi
-        fi
-        SESSION_ENV="XDG_CURRENT_DESKTOP=GNOME"
-        ;;
-    xfce)    SESSION_CMD="startxfce4" ;;
-    openbox) SESSION_CMD="openbox-session" ;;
-    *)       SESSION_CMD="xterm" ;;
-esac
 
-# Openbox on its own shows only a bare background + cursor, and touch VNC has no
-# right-click to reach its menu. Autostart a panel and a terminal so there's an
-# immediately usable desktop (e.g. to run `wine notepad`).
-if [ "$SESSION_CMD" = "openbox-session" ]; then
+# --- bringing a session up, and proving it stayed up -------------------------
+#
+# There used to be a setting asking the user to choose between X11 and nested
+# Wayland. That was the wrong question to ask anyone: there is no way for a
+# person to know which of the two their phone, their GNOME version and proot
+# will tolerate, and being asked made them responsible for an answer only an
+# attempt can give. So the app tries, checks, and falls back.
+
+WHALE=no
+
+# A desktop is "up" when its own process is running. gnome-session-failed is
+# GNOME's fail whale: it appears precisely when the shell has died, so finding
+# it is a definite failure rather than an absence of evidence.
+session_alive() {
+    local d c found=1
+    WHALE=no
+    for d in /proc/[0-9]*; do
+        [ -r "$d/cmdline" ] || continue
+        { c=$(<"$d/cmdline"); } 2>/dev/null || continue
+        case "$c" in
+            *gnome-session-failed*) WHALE=yes ;;
+            *gnome-shell*|*xfce4-session*|*openbox-session*) found=0 ;;
+        esac
+    done
+    return $found
+}
+
+# Wait for the session to appear AND still be there a moment later. Seen once is
+# not proof: a shell that crashes on startup exists for a second or two first,
+# and that is the exact case we are trying to tell apart.
+wait_for_session() {
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        sleep 2 || true
+        if [ "$WHALE" = yes ]; then return 1; fi
+        if session_alive; then
+            sleep 3 || true
+            session_alive || return 1
+            [ "$WHALE" = no ] || return 1
+            return 0
+        fi
+    done
+    return 1
+}
+
+teardown() {
+    vncserver -kill ":$DISPLAY_NUM" >/dev/null 2>&1 || true
+    sweep TERM
+    sleep 1 || true
+    sweep KILL
+    rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}" 2>/dev/null || true
+    rm -f "/root/.vnc/"*":${DISPLAY_NUM}.pid" 2>/dev/null || true
+}
+
+# Print what the session itself said. This has to run on every failing path: the
+# first version let `set -e` abort at a failing vncserver, so the one case that
+# needed explaining was the one case that explained nothing.
+report_session() {
+    if [ -r "$SESSION_LOG" ] && [ -s "$SESSION_LOG" ]; then
+        echo "=================== $SESSION_LOG ==================="
+        mapfile -t _lines < "$SESSION_LOG" 2>/dev/null || _lines=()
+        n=${#_lines[@]}
+        i=$((n > 40 ? n - 40 : 0))
+        while [ "$i" -lt "$n" ]; do echo "${_lines[$i]:0:200}"; i=$((i + 1)); done
+        echo "==================================================="
+    else
+        echo "[session] $SESSION_LOG is empty or missing — the session command"
+        echo "[session] did not get far enough to write to it."
+    fi
+}
+
+# One full attempt: configure, write xstartup, start the server, verify.
+# Returns 0 only if a desktop is actually running at the end of it.
+attempt() {   # $1 = session type (x11|wayland)
+    local stype="$1" session_cmd session_env="" gs_help gs_args
+
+    case "$DE" in
+        gnome)
+            if have gnome-session; then
+                setup_gnome "$stype"
+                # Ask the installed gnome-session what options it has rather than
+                # assuming. --builtin existed in GNOME 43 and was REMOVED by 46:
+                # passing it there is "Unknown option", exit 1, and a session that
+                # never starts. It is not needed either — gnome-session falls back
+                # to the non-systemd startup procedure on its own.
+                gs_help=$(gnome-session --help-all 2>&1 || true)
+                gs_args="--session=whatsthat"
+                case "$gs_help" in *--builtin*) gs_args="--builtin $gs_args" ;; esac
+                # Under llvmpipe the acceleration check is a pure liability:
+                # GNOME supports software rendering here, and a failed check can
+                # only cost us the session.
+                case "$gs_help" in
+                    *--disable-acceleration-check*) gs_args="$gs_args --disable-acceleration-check" ;;
+                esac
+                session_cmd="gnome-session $gs_args"
+            else
+                echo "[desktop] gnome-session is missing — starting the shell on its own."
+                session_cmd="gnome-shell"
+                if [ "$stype" = "wayland" ]; then session_cmd="gnome-shell --wayland --nested"; fi
+            fi
+            session_env="XDG_CURRENT_DESKTOP=GNOME"
+            ;;
+        xfce)    session_cmd="startxfce4" ;;
+        openbox) session_cmd="openbox-session" ;;
+        *)       session_cmd="xterm" ;;
+    esac
+
+    rm -f "$SESSION_LOG" 2>/dev/null || true
+
+    # Regenerated every launch so fixes reach an installed system without
+    # reinstalling it. Everything the session prints goes to one fixed path in
+    # the shared /tmp, which the app can also read straight off its own
+    # filesystem — no guessing at TigerVNC's log filename, which is how an
+    # earlier round ended up with no diagnosis at all.
+    local dbus_wrapper="dbus-launch --exit-with-session"
+    if have dbus-run-session; then dbus_wrapper="dbus-run-session --"; fi
+
+    mkdir -p /root/.vnc
+    {
+        echo '#!/bin/bash'
+        echo "exec > $SESSION_LOG 2>&1"
+        echo 'unset SESSION_MANAGER'
+        echo 'unset DBUS_SESSION_BUS_ADDRESS'
+        # /usr/bin/gnome-session re-execs itself through a login shell when
+        # XDG_SESSION_TYPE=wayland and SHELL is set. Nothing to gain, a whole
+        # environment to lose.
+        echo 'unset SHELL'
+        echo 'export HOME=/root'
+        echo "export XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+        echo 'export XKL_XMODMAP_DISABLE=1'
+        echo 'export NO_AT_BRIDGE=1'
+        # No DRI device exists behind Xvnc, so this only makes the fallback
+        # explicit rather than discovered. llvmpipe is a renderer GNOME supports
+        # on purpose: its own hardware-compatibility list blacklists softpipe and
+        # whitelists llvmpipe by name.
+        echo 'export LIBGL_ALWAYS_SOFTWARE=1'
+        # GTK4 defaults to a Vulkan renderer with nothing to run on here, and
+        # degrades badly when it falls back; cairo is the honest choice on a CPU
+        # rasteriser and is visibly faster for Files, Text Editor and Settings.
+        echo 'export GSK_RENDERER=cairo'
+        if [ -n "$session_env" ]; then echo "export $session_env"; fi
+        if [ "$stype" = "wayland" ]; then
+            echo 'export XDG_SESSION_TYPE=wayland'
+            # The nested compositor has no monitor to ask, so it takes its size
+            # from here. Matching the VNC geometry makes it fill the screen.
+            echo "export MUTTER_DEBUG_DUMMY_MODE_SPECS=$GEOMETRY"
+        else
+            echo 'export XDG_SESSION_TYPE=x11'
+        fi
+        echo "exec $dbus_wrapper $session_cmd"
+    } > /root/.vnc/xstartup
+    chmod +x /root/.vnc/xstartup
+
+    echo "[desktop] trying $DE ($stype): $session_cmd"
+    local rc=0
+    vncserver ":$DISPLAY_NUM" \
+        -geometry "$GEOMETRY" \
+        -depth "$DEPTH" \
+        -localhost yes \
+        -SecurityTypes None || rc=$?
+
+    if [ "$rc" != 0 ]; then
+        echo "[desktop] the VNC server could not bring the session up (exit $rc)."
+        report_session
+        return 1
+    fi
+
+    if wait_for_session; then
+        echo "[desktop] $DE ($stype) is running."
+        return 0
+    fi
+
+    if [ "$WHALE" = yes ]; then
+        echo "[desktop] GNOME came up and then failed (its \"Oh no\" screen)."
+    else
+        echo "[desktop] the session did not stay running."
+    fi
+    report_session
+    return 1
+}
+
+# Openbox on its own shows only a bare background and a cursor, and touch VNC
+# has no right-click to reach its menu. Autostart a panel and a terminal so
+# there is an immediately usable desktop (e.g. to run `wine notepad`).
+if [ "$DE" = "openbox" ]; then
     mkdir -p /root/.config/openbox
-    cat > /root/.config/openbox/autostart <<'EOF'
+    cat > /root/.config/openbox/autostart <<'OBEOF'
 command -v tint2 >/dev/null 2>&1 && tint2 &
 command -v xterm >/dev/null 2>&1 && xterm -geometry 110x30+30+30 &
-EOF
+OBEOF
 fi
 
 # --- audio -------------------------------------------------------------------
 # The container can't reach the speaker directly. Run PulseAudio here, route
 # everything to a null sink, and stream that sink's PCM over loopback TCP
 # (s16le/48k/stereo) — the app's AudioBridge reads 127.0.0.1:4712 and plays it.
+# Done once, before any attempt: it is independent of how the desktop draws.
 if have pulseaudio; then
     pulseaudio --kill >/dev/null 2>&1 || true
     sleep 1 || true
@@ -272,108 +414,25 @@ if have pulseaudio; then
         listen=127.0.0.1 port=4712 format=s16le rate=48000 channels=2 >/dev/null 2>&1 || true
 fi
 
-# --- the session itself ------------------------------------------------------
-#
-# Regenerated every launch so fixes apply without reinstalling the desktop.
-#
-# Everything the session prints goes to one fixed path in the shared /tmp, which
-# the app can read straight off its own filesystem without entering the
-# container. The previous round hunted for TigerVNC's own log by guessing at its
-# filename, found nothing, and so a failed session reported precisely nothing.
-DBUS_WRAPPER="dbus-launch --exit-with-session"
-if have dbus-run-session; then DBUS_WRAPPER="dbus-run-session --"; fi
-
-mkdir -p /root/.vnc
-{
-    echo '#!/bin/bash'
-    echo "exec > $SESSION_LOG 2>&1"
-    echo 'unset SESSION_MANAGER'
-    echo 'unset DBUS_SESSION_BUS_ADDRESS'
-    # /usr/bin/gnome-session re-execs itself through a login shell when
-    # XDG_SESSION_TYPE=wayland and SHELL is set. There is nothing to gain from
-    # that here and a whole environment to lose, so take the branch away.
-    echo 'unset SHELL'
-    echo 'export HOME=/root'
-    echo "export XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
-    echo 'export XKL_XMODMAP_DISABLE=1'
-    echo 'export NO_AT_BRIDGE=1'
-    # No DRI device exists behind Xvnc, so this only makes the fallback explicit
-    # rather than discovered. llvmpipe is a renderer GNOME supports on purpose:
-    # its own hardware-compatibility list blacklists softpipe and whitelists
-    # llvmpipe by name.
-    echo 'export LIBGL_ALWAYS_SOFTWARE=1'
-    # GTK4 defaults to a Vulkan renderer that has nothing to run on here and
-    # degrades badly when it falls back; cairo is the honest choice on a CPU
-    # rasteriser and is visibly faster for Files, Text Editor and Settings.
-    echo 'export GSK_RENDERER=cairo'
-    if [ -n "$SESSION_ENV" ]; then echo "export $SESSION_ENV"; fi
-    if [ "$SESSION_TYPE" = "wayland" ]; then
-        echo 'export XDG_SESSION_TYPE=wayland'
-        # The nested compositor has no monitor to ask, so it takes its size from
-        # here. Matching the VNC geometry makes it fill the screen exactly.
-        echo "export MUTTER_DEBUG_DUMMY_MODE_SPECS=$GEOMETRY"
-    else
-        echo 'export XDG_SESSION_TYPE=x11'
-    fi
-    echo "exec $DBUS_WRAPPER $SESSION_CMD"
-} > /root/.vnc/xstartup
-chmod +x /root/.vnc/xstartup
-
-# Print what the session itself said. This is the whole point of redirecting it
-# to a known path, and it has to run on BOTH paths: the first version let
-# `set -e` abort at a failing vncserver, so the one case that needed explaining
-# was the one case that explained nothing.
-report_session() {
-    if [ -r "$SESSION_LOG" ] && [ -s "$SESSION_LOG" ]; then
-        echo "=================== $SESSION_LOG ==================="
-        mapfile -t _lines < "$SESSION_LOG" 2>/dev/null || _lines=()
-        n=${#_lines[@]}
-        i=$((n > 40 ? n - 40 : 0))
-        while [ "$i" -lt "$n" ]; do echo "${_lines[$i]:0:200}"; i=$((i + 1)); done
-        echo "==================================================="
-    else
-        echo "[session] $SESSION_LOG is empty or missing — the session command"
-        echo "[session] did not even get far enough to write to it."
-    fi
-}
-
-echo "[desktop] Starting $DE ($SESSION_TYPE) on :$DISPLAY_NUM (${GEOMETRY})..."
-# -localhost: only the on-device app can reach it. SecurityTypes None because
-# the socket never leaves localhost inside the app sandbox.
-vnc_rc=0
-vncserver ":$DISPLAY_NUM" \
-    -geometry "$GEOMETRY" \
-    -depth "$DEPTH" \
-    -localhost yes \
-    -SecurityTypes None || vnc_rc=$?
-
-if [ "$vnc_rc" != 0 ]; then
-    echo "[desktop] the VNC server could not bring the session up (exit $vnc_rc)."
-    report_session
-    exit "$vnc_rc"
+# Which session types to try, best guess first. For anything but GNOME there is
+# only one way to run it. For GNOME, whatever worked last time is tried first —
+# the app passes it back in — and the other is the fallback.
+CANDIDATES="x11"
+if [ "$DE" = "gnome" ]; then
+    if [ "$WANT_SESSION" = "wayland" ]; then CANDIDATES="wayland x11"; else CANDIDATES="x11 wayland"; fi
 fi
 
-echo "[desktop] display is up."
-echo "VNC_READY 127.0.0.1:$PORT"
-
-# --- did the session actually survive? ---------------------------------------
-#
-# "Desktop is running" only ever meant the X server came up; the session inside
-# it can still die a second later, which is exactly what GNOME's fail whale is.
-# This runs in the FOREGROUND after the READY line: the app reads until READY,
-# opens the viewer, then drains the rest on a thread, and proot tears the
-# container down the moment this script exits — so a backgrounded check would be
-# killed before it could speak. That is not a guess; it is what happened.
-sleep 10 || true
-alive=no
-for d in /proc/[0-9]*; do
-    [ -r "$d/cmdline" ] || continue
-    { c=$(<"$d/cmdline"); } 2>/dev/null || continue
-    case "$c" in
-        *gnome-shell*|*xfce4-session*|*openbox*) alive=yes; break ;;
-    esac
+for stype in $CANDIDATES; do
+    if attempt "$stype"; then
+        # The app stores this and tries it first next time, so a device only
+        # pays for the discovery once.
+        echo "WT_SESSION_USED $stype"
+        echo "VNC_READY 127.0.0.1:$PORT"
+        exit 0
+    fi
+    echo "[desktop] cleaning up before the next attempt..."
+    teardown
 done
-echo "[session] desktop process alive: $alive"
-if [ "$alive" = no ]; then
-    report_session
-fi
+
+echo "[desktop] no session type worked. The log above is the reason."
+exit 1

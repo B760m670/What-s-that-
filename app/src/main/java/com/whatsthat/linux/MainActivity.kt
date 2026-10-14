@@ -96,9 +96,10 @@ class MainActivity : AppCompatActivity() {
             }
             if (installed) {
                 addChip(desktop.name, R.color.state_absent)
-                // Only GNOME has a choice to report; saying "X11 session" next to
-                // XFCE would imply an option that does not exist.
-                if (desktop.supportsWayland) {
+                // Reported, not offered: this is what the last successful launch
+                // settled on, so it says something true about the system rather
+                // than asking a question the user cannot answer.
+                if (desktop.supportsWayland && running) {
                     addChip(getString(R.string.chip_session, env.sessionTypeFor(d).label), R.color.state_absent)
                 }
             }
@@ -224,25 +225,9 @@ class MainActivity : AppCompatActivity() {
                 val de = options[which]
                 env.setDesktop(d, de)
                 dialog.dismiss()
-                if (de.supportsWayland) chooseSessionType(d) else refreshState()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    private fun chooseSessionType(d: Distro) {
-        val types = SessionType.entries.toTypedArray()
-        val labels = types.map {
-            getString(if (it == SessionType.X11) R.string.session_x11 else R.string.session_wayland)
-        }
-        AlertDialog.Builder(this)
-            .setTitle(R.string.session_title)
-            .setSingleChoiceItems(labels.toTypedArray(), types.indexOf(env.sessionTypeFor(d))) { dialog, which ->
-                env.setSessionType(d, types[which])
-                dialog.dismiss()
                 refreshState()
             }
-            .setNegativeButton(android.R.string.cancel) { _, _ -> refreshState() }
+            .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
 

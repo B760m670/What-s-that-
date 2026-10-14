@@ -63,9 +63,6 @@
     <string name="desktop_title">Desktop for %1$s</string>
     <string name="desktop_option">%1$s — %2$s</string>
     <string name="de_installed">installed</string>
-    <string name="session_title">How GNOME draws</string>
-    <string name="session_x11">X11 — one composite fewer, so faster here. GNOME deleted this mode upstream in version 49.</string>
-    <string name="session_wayland">Wayland — a real Wayland compositor, nested in the display. Costs an extra composite every frame.</string>
     <string name="chip_session">%1$s session</string>
     <string name="err_launch_logged">The session log has been added to the console below.</string>
     <string name="session_log_header">— session log —</string>

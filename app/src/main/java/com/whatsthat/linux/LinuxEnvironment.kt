@@ -49,10 +49,19 @@ class LinuxEnvironment(context: Context) {
         prefs.edit().putString("de:${d.id}", de.id).apply()
     }
 
+    /**
+     * The session type to TRY FIRST — not a user setting.
+     *
+     * There is no way for a person to know whether their phone, their GNOME
+     * version and proot will tolerate an X11 session or a nested Wayland one;
+     * asking them made them responsible for an answer only an attempt can give.
+     * So the launch script tries both and reports which one held, and this is
+     * where that answer is kept so the discovery is paid for once.
+     */
     fun sessionTypeFor(d: Distro): SessionType =
         SessionType.byId(prefs.getString("session:${d.id}", SessionType.X11.id))
 
-    fun setSessionType(d: Distro, t: SessionType) {
+    private fun rememberSessionType(d: Distro, t: SessionType) {
         prefs.edit().putString("session:${d.id}", t.id).apply()
     }
 
@@ -275,10 +284,17 @@ class LinuxEnvironment(context: Context) {
         val reader = process.inputStream.bufferedReader()
 
         var endpoint: String? = null
-        val deadline = System.currentTimeMillis() + 90_000
+        // Generous, because the script now PROVES the desktop is alive before
+        // saying so: it may try one session type, watch it die, tear it down and
+        // try the other. Waiting is much better than opening a viewer onto a
+        // session that has already failed, which is what used to happen.
+        val deadline = System.currentTimeMillis() + 240_000
         while (System.currentTimeMillis() < deadline) {
             val line = reader.readLine() ?: break          // EOF = process exited early
             onLog(line)
+            line.substringAfter("WT_SESSION_USED ", "").trim().takeIf { it.isNotEmpty() }?.let {
+                rememberSessionType(activeDistro, SessionType.byId(it))
+            }
             val ep = line.substringAfter("VNC_READY ", "").trim()
             if (ep.isNotEmpty()) { endpoint = ep; break }
         }

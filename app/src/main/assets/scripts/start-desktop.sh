@@ -288,12 +288,73 @@ report_session() {
         echo "=================== $SESSION_LOG ==================="
         mapfile -t _lines < "$SESSION_LOG" 2>/dev/null || _lines=()
         n=${#_lines[@]}
-        i=$((n > 40 ? n - 40 : 0))
+        i=$((n > 80 ? n - 80 : 0))
         while [ "$i" -lt "$n" ]; do echo "${_lines[$i]:0:200}"; i=$((i + 1)); done
         echo "==================================================="
     else
         echo "[session] $SESSION_LOG is empty or missing — the session command"
         echo "[session] did not get far enough to write to it."
+    fi
+}
+
+# gnome-shell dies without a SYSTEM D-Bus, and this is not a guess: its
+# _initializeUI builds an EndSessionDialog, that reaches for Gio.DBus.system,
+# and with no socket at /run/dbus/system_bus_socket the getter throws
+#
+#   JS ERROR: Gio.IOErrorEnum: Could not connect: No such file or directory
+#     _init@resource:///org/gnome/shell/ui/endSessionDialog.js:244
+#     _initializeUI@resource:///org/gnome/shell/ui/main.js:300
+#
+# which escapes main.js and takes the shell with it. The session bus we already
+# had is a different bus; it does not help.
+#
+# Note what is NOT needed: logind, accountsservice, polkit. The shell copes with
+# those names having no owner. It cannot cope with there being no bus to ask.
+start_system_bus() {
+    mkdir -p /run/dbus 2>/dev/null || true
+    rm -f /run/dbus/pid 2>/dev/null || true
+    if [ -S /run/dbus/system_bus_socket ]; then
+        echo "[desktop] system D-Bus already up."
+        return 0
+    fi
+
+    dbus-daemon --system --fork >/dev/null 2>/tmp/.wt-sysbus.err || true
+    if [ -S /run/dbus/system_bus_socket ]; then
+        echo "[desktop] system D-Bus started."
+        return 0
+    fi
+
+    # The packaged system bus drops privileges to the messagebus user, which is
+    # one more thing that can fail under a fake root. If it did, run a bus of our
+    # own on the same socket: the shell only needs something to connect to.
+    echo "[desktop] packaged system bus did not start; using a private one."
+    sed 's/^/[desktop]   /' /tmp/.wt-sysbus.err 2>/dev/null | head -3
+    cat > /etc/dbus-1/wt-system.conf <<'DBEOF'
+<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <type>system</type>
+  <listen>unix:path=/run/dbus/system_bus_socket</listen>
+  <policy context="default">
+    <allow user="*"/>
+    <allow own="*"/>
+    <allow send_type="method_call"/>
+    <allow send_type="signal"/>
+    <allow send_type="method_return"/>
+    <allow send_type="error"/>
+    <allow receive_type="method_call"/>
+    <allow receive_type="signal"/>
+    <allow receive_type="method_return"/>
+    <allow receive_type="error"/>
+  </policy>
+  <includedir>system.d</includedir>
+</busconfig>
+DBEOF
+    dbus-daemon --config-file=/etc/dbus-1/wt-system.conf --fork >/dev/null 2>&1 || true
+    if [ -S /run/dbus/system_bus_socket ]; then
+        echo "[desktop] private system D-Bus started."
+    else
+        echo "[desktop] no system D-Bus — GNOME will not start without one."
     fi
 }
 
@@ -334,6 +395,7 @@ attempt() {   # $1 = session type (x11|wayland)
     esac
 
     rm -f "$SESSION_LOG" 2>/dev/null || true
+    start_system_bus
 
     # Regenerated every launch so fixes reach an installed system without
     # reinstalling it. Everything the session prints goes to one fixed path in

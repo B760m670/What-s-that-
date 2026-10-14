@@ -168,7 +168,7 @@ class MainActivity : AppCompatActivity() {
         // that — leaves its reason in the session log and nowhere else. Copy it
         // into the console so the answer is one tap away instead of nowhere.
         if (step == Step.LAUNCH) {
-            val log = env.sessionLog(60)
+            val log = env.sessionLog(120)
             if (log.isNotEmpty()) {
                 appendLog(getString(R.string.session_log_header))
                 log.forEach(::appendLog)

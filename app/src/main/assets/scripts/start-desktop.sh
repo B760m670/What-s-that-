@@ -141,6 +141,13 @@ setup_gnome() {   # $1 = session type
     # through logind, which does not exist, so a session that locks itself can
     # never be unlocked. Animations are off because every frame of them is drawn
     # by llvmpipe on the CPU and then re-encoded by the VNC server.
+    #
+    # Tracker is told to index nothing. On a phone it would crawl the whole
+    # rootfs for a search feature nobody opened, on a CPU that is already
+    # drawing the desktop in software — and under proot its extractor cannot
+    # work anyway: "Refusing to extract file data since Landlock could not be
+    # enabled", then the parent is told the child died because of the same
+    # broken waitid that cost us gnome-session.
     mkdir -p /etc/dconf/profile /etc/dconf/db/local.d
     printf 'user-db:user\nsystem-db:local\n' > /etc/dconf/profile/user
     cat > /etc/dconf/db/local.d/00-whatsthat <<'EOF'
@@ -156,6 +163,12 @@ enable-animations=false
 
 [org/gnome/mutter]
 check-alive-timeout=uint32 60000
+
+[org/freedesktop/tracker3/miner/files]
+index-recursive-directories=@as []
+index-single-directories=@as []
+enable-monitors=false
+index-on-battery=false
 EOF
     dconf update 2>/dev/null || echo "[desktop] dconf update failed — lock screen may be active."
 }
@@ -365,6 +378,10 @@ attempt() {   # $1 = session type (x11|wayland)
         echo "export XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
         echo 'export XKL_XMODMAP_DISABLE=1'
         echo 'export NO_AT_BRIDGE=1'
+        # Without this GTK hunts for an accessibility bus that is not running
+        # and warns, per application, that it could not find one. GTK's own
+        # message says to set this.
+        echo 'export GTK_A11Y=none'
         # No DRI device exists behind Xvnc, so this only makes the fallback
         # explicit rather than discovered. llvmpipe is a renderer GNOME supports
         # on purpose: its own hardware-compatibility list blacklists softpipe and

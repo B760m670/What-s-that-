@@ -191,6 +191,11 @@ if [ "$DE" = "gnome" ]; then
     # and a pile of services that cannot run under proot.
     try_install yaru-theme-gtk yaru-theme-icon ubuntu-wallpapers fonts-ubuntu \
                 gnome-shell-extension-ubuntu-dock || true
+
+    # What fills the status area at the top right. D-Bus activates both on
+    # demand once a system bus exists, so neither needs supervising.
+    # NetworkManager is left out on purpose: the phone owns the network.
+    try_install upower accountsservice || true
 elif [ "$PROFILE" = "lite" ]; then
     step "Installing the lite desktop"
     apt-get install -y --no-install-recommends \

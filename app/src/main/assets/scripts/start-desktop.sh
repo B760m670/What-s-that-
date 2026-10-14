@@ -180,6 +180,21 @@ if [ "$DE" = "gnome" ]; then
     # services that cannot run here.
     ensure_packages libjxl-gdk-pixbuf yaru-theme-gtk yaru-theme-icon \
                     gnome-shell-extension-ubuntu-dock ubuntu-wallpapers fonts-ubuntu
+    # The top-right status area was empty because the services behind it were
+    # not installed. They do not need a supervisor: D-Bus activates them from
+    # their .service files the moment the shell asks for the name, which is
+    # exactly what a system bus is for — and why there was no point installing
+    # them before there was one.
+    #
+    #   upower           battery and power. /sys is bound into the container, so
+    #                    it can actually read the phone's battery.
+    #   accountsservice  the user name and avatar. Without it the shell reports
+    #                    "ActUserManager: user (null) has no username".
+    #
+    # NetworkManager is deliberately NOT here. It would try to take over network
+    # interfaces it has no permission to touch on Android, and should not
+    # succeed even if it could — the phone owns the network, not the container.
+    ensure_packages upower accountsservice
 fi
 
 echo "[desktop] desktop: $DE"
@@ -424,6 +439,12 @@ start_system_bus() {
 <busconfig>
   <type>system</type>
   <listen>unix:path=/run/dbus/system_bus_socket</listen>
+  <!-- Without this the bus exists but can activate nothing: a service is
+       started from its .service file in these directories, and a bus that does
+       not read them answers ServiceUnknown for every name on the system. That
+       is the difference between a bus GNOME can talk to and one it cannot get
+       upower or accountsservice out of. -->
+  <standard_system_servicedirs/>
   <policy context="default">
     <allow user="*"/>
     <allow own="*"/>

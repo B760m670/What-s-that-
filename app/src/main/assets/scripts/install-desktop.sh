@@ -166,7 +166,8 @@ if [ "$DE" = "gnome" ]; then
     #                      defaults before a session bus exists.
     if ! apt-get install -y --no-install-recommends \
             gnome-shell gnome-session-bin gnome-settings-daemon \
-            xwayland libgl1-mesa-dri dconf-cli gsettings-desktop-schemas; then
+            xwayland libgl1-mesa-dri dconf-cli gsettings-desktop-schemas \
+            libjxl-gdk-pixbuf; then
         echo "[install] GNOME could not be installed. Falling back to XFCE."
         DE=xfce
         apt-get install -y --no-install-recommends xfce4 xfce4-terminal

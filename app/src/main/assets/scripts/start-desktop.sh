@@ -143,14 +143,30 @@ if [ -z "$DE" ]; then
     fi
 fi
 
-# The window check needs xwininfo. A system whose desktop was installed before
-# that check existed does not have it, so fetch it once — it is a quarter of a
-# megabyte, and without it the only thing we can tell about a black screen is
-# that the process is running, which is what made the last one undiagnosable.
-if ! have xwininfo; then
-    echo "[desktop] fetching x11-utils for the window check (one-off)..."
-    timeout 120 apt-get install -y --no-install-recommends x11-utils >/dev/null 2>&1 || \
-        echo "[desktop] x11-utils unavailable — the window check will be skipped."
+# Packages a system installed before they mattered will not have. Fetching them
+# at launch is a one-off: once present, dpkg answers instantly and nothing
+# happens. Failure is never fatal — the desktop starts either way, just with
+# whatever that package would have provided missing.
+ensure_packages() {   # $@ = package names
+    local p missing=""
+    for p in "$@"; do
+        dpkg -s "$p" >/dev/null 2>&1 || missing="$missing $p"
+    done
+    [ -n "$missing" ] || return 0
+    echo "[desktop] fetching$missing (one-off)..."
+    # shellcheck disable=SC2086
+    timeout 180 apt-get install -y --no-install-recommends $missing >/dev/null 2>&1 || \
+        echo "[desktop] could not fetch$missing — carrying on without."
+}
+
+#   x11-utils          xwininfo, which is how we tell a drawn desktop from a
+#                      black screen; without it a failure is undiagnosable.
+#   libjxl-gdk-pixbuf  GNOME 46 ships its wallpapers as JPEG XL. With no loader
+#                      for it the shell says "Unrecognized image file format"
+#                      and you get a flat colour instead of a desktop.
+ensure_packages x11-utils
+if [ "$DE" = "gnome" ]; then
+    ensure_packages libjxl-gdk-pixbuf
 fi
 
 echo "[desktop] desktop: $DE"
@@ -199,7 +215,43 @@ index-single-directories=@as []
 enable-monitors=false
 index-on-battery=false
 EOF
+    # The dash shows GNOME's stock favourites, which are applications nobody
+    # installed here — so it comes up almost empty. Build the list from what is
+    # actually on this system instead, in the order a person would want it.
+    local favs="" id
+    for id in org.gnome.Epiphany firefox-esr firefox org.gnome.Nautilus \
+              org.gnome.Terminal org.gnome.Console org.gnome.TextEditor \
+              org.gnome.Settings org.gnome.SystemMonitor org.gnome.Calculator \
+              org.gnome.FileRoller org.gnome.Loupe org.gnome.eog; do
+        if [ -f "/usr/share/applications/$id.desktop" ]; then
+            favs="$favs${favs:+, }'$id.desktop'"
+        fi
+    done
+    if [ -n "$favs" ]; then
+        cat >> /etc/dconf/db/local.d/00-whatsthat <<EOF
+
+[org/gnome/shell]
+favorite-apps=[$favs]
+EOF
+    fi
+
     dconf update 2>/dev/null || echo "[desktop] dconf update failed — lock screen may be active."
+
+    # Android hands the app a set of supplementary groups (inet, sdcard_rw and
+    # friends) and proot passes them straight through, so every shell greets you
+    # with "groups: cannot find name for group ID 3003". The container has no
+    # idea what those numbers mean; give them names so it stops asking.
+    local gids line g
+    while IFS= read -r line; do
+        case "$line" in
+            Groups:*) gids=${line#Groups:} ;;
+        esac
+    done < /proc/self/status
+    for g in ${gids:-}; do
+        if ! grep -q ":x\?:$g:" /etc/group 2>/dev/null; then
+            echo "android_$g:x:$g:" >> /etc/group
+        fi
+    done
 }
 
 WHALE=no
@@ -546,7 +598,7 @@ fi
 # file actually defines — because an edit once removed four of these at once,
 # the file still parsed, CI stayed green, and the phone said
 # "wait_for_session: command not found" halfway through a launch.
-WT_REQUIRED_FUNCTIONS="read_field sweep_orphans sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus system_bus_answers wait_for_socket attempt start_audio"
+WT_REQUIRED_FUNCTIONS="read_field ensure_packages sweep_orphans sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus system_bus_answers wait_for_socket attempt start_audio"
 for _f in $WT_REQUIRED_FUNCTIONS; do
     if ! declare -F "$_f" >/dev/null; then
         echo "[desktop] INTERNAL ERROR: this script is missing $_f. Not launching."

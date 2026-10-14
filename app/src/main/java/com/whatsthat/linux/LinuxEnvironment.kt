@@ -18,7 +18,28 @@ class LinuxEnvironment(context: Context) {
     private val distrosDir = File(home, "distros")
     private val prefs = appContext.getSharedPreferences("wt", Context.MODE_PRIVATE)
 
-    init { migrateLegacyUbuntu() }
+    init {
+        migrateLegacyUbuntu()
+        forgetDialogChosenSessionTypes()
+    }
+
+    /**
+     * Drop session types chosen in the old picker, once.
+     *
+     * That dialog asked the user which of X11 or nested Wayland to run, which
+     * nobody can answer without trying, and stored the guess as if it were
+     * knowledge. From now on this preference is only ever written by a launch
+     * that actually produced a desktop, so the guesses have to go — otherwise a
+     * device keeps starting with whichever one happened to be tapped.
+     */
+    private fun forgetDialogChosenSessionTypes() {
+        if (prefs.getBoolean("session_pref_reset", false)) return
+        val stale = prefs.all.keys.filter { it.startsWith("session:") }
+        prefs.edit().apply {
+            stale.forEach { remove(it) }
+            putBoolean("session_pref_reset", true)
+        }.apply()
+    }
 
     /** Per-distro rootfs directory. */
     private fun distroDir(d: Distro) = File(distrosDir, d.id)

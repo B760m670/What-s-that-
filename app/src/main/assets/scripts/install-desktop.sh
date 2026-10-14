@@ -102,6 +102,7 @@ apt-get install -y --no-install-recommends \
     ca-certificates curl wget nano less sudo procps \
     locales dbus-x11 tzdata \
     tigervnc-standalone-server tigervnc-common \
+    x11-utils \
     pulseaudio pulseaudio-utils \
     fonts-dejavu-core
 

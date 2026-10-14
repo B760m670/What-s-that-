@@ -114,9 +114,17 @@ if [ -z "$DE" ]; then
     fi
 fi
 
-SESSION_TYPE=x11
-if [ "$DE" = "gnome" ] && [ "$WANT_SESSION" = "wayland" ]; then SESSION_TYPE=wayland; fi
-echo "[desktop] desktop: $DE  session: $SESSION_TYPE"
+# The window check needs xwininfo. A system whose desktop was installed before
+# that check existed does not have it, so fetch it once — it is a quarter of a
+# megabyte, and without it the only thing we can tell about a black screen is
+# that the process is running, which is what made the last one undiagnosable.
+if ! have xwininfo; then
+    echo "[desktop] fetching x11-utils for the window check (one-off)..."
+    timeout 120 apt-get install -y --no-install-recommends x11-utils >/dev/null 2>&1 || \
+        echo "[desktop] x11-utils unavailable — the window check will be skipped."
+fi
+
+echo "[desktop] desktop: $DE"
 
 # --- GNOME: our own session definition ---------------------------------------
 #
@@ -215,6 +223,18 @@ EOF
 
 WHALE=no
 
+# How many top-level windows are mapped on the display. This is the difference
+# between "the process exists" and "something was drawn": a shell can sit there
+# alive and map nothing, which from the sofa is indistinguishable from a crash —
+# a black screen. Needs x11-utils; when it is absent the count is reported as
+# unknown and the process check stands alone.
+mapped_windows() {
+    if ! have xwininfo; then echo unknown; return; fi
+    local out
+    out=$(xwininfo -root -children -display ":$DISPLAY_NUM" 2>/dev/null) || { echo unknown; return; }
+    echo "$out" | grep -cE '^ +0x[0-9a-f]+' || echo 0
+}
+
 # A desktop is "up" when its own process is running. gnome-session-failed is
 # GNOME's fail whale: it appears precisely when the shell has died, so finding
 # it is a definite failure rather than an absence of evidence.
@@ -259,9 +279,10 @@ teardown() {
     rm -f "/root/.vnc/"*":${DISPLAY_NUM}.pid" 2>/dev/null || true
 }
 
-# Print what the session itself said. This has to run on every failing path: the
-# first version let `set -e` abort at a failing vncserver, so the one case that
-# needed explaining was the one case that explained nothing.
+# Print what the session itself said. This runs on EVERY launch, not only on
+# failure. A session that starts, stays running and draws nothing is a failure
+# too — a black screen — and the first version printed nothing at all for it,
+# because it only spoke when the process was gone.
 report_session() {
     if [ -r "$SESSION_LOG" ] && [ -s "$SESSION_LOG" ]; then
         echo "=================== $SESSION_LOG ==================="
@@ -373,7 +394,16 @@ attempt() {   # $1 = session type (x11|wayland)
     fi
 
     if wait_for_session; then
-        echo "[desktop] $DE ($stype) is running."
+        local win
+        win=$(mapped_windows)
+        echo "[desktop] $DE ($stype) is running; mapped windows: $win"
+        if [ "$win" = 0 ]; then
+            echo "[desktop] the session is alive but has drawn nothing — a black"
+            echo "[desktop] screen. Treating that as a failure, not a success."
+            report_session
+            return 1
+        fi
+        report_session
         return 0
     fi
 

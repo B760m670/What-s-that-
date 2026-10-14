@@ -55,6 +55,14 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default package list still contains the obsolete
+          # `tools` package, which Google removed from the SDK repository —
+          # sdkmanager then fails with "Failed to find package 'tools'" and
+          # takes the whole build with it. The runner image already ships the
+          # platforms and build-tools we compile against, so name the one
+          # package we actually want instead of taking the default.
+          packages: platform-tools
 
       - name: Fetch proot engine binaries
         run: |

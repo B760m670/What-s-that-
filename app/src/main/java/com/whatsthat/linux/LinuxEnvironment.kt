@@ -305,13 +305,31 @@ class LinuxEnvironment(context: Context) {
         val reader = process.inputStream.bufferedReader()
 
         var endpoint: String? = null
-        // Generous, because the script now PROVES the desktop is alive before
-        // saying so: it may try one session type, watch it die, tear it down and
-        // try the other. Waiting is much better than opening a viewer onto a
-        // session that has already failed, which is what used to happen.
-        val deadline = System.currentTimeMillis() + 240_000
-        while (System.currentTimeMillis() < deadline) {
+
+        // A total time limit was wrong. The launch can legitimately take a very
+        // long time — it may install several hundred megabytes the first time,
+        // try one session type, watch it die and try the other — and a 240
+        // second cap reported LAUNCH FAILED in the middle of a Firefox download
+        // that was going perfectly well, leaving the script running orphaned.
+        //
+        // What actually indicates a hang is silence, so that is what is
+        // measured. readLine() blocks, so the watchdog runs beside it and ends
+        // the process, which is what makes readLine() return.
+        val lastOutput = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis())
+        Thread {
+            while (desktopProcess === process && process.isAlive) {
+                if (System.currentTimeMillis() - lastOutput.get() > SILENCE_LIMIT_MS) {
+                    onLog("[launch] no output for ${SILENCE_LIMIT_MS / 1000}s — giving up.")
+                    runCatching { process.destroy() }
+                    return@Thread
+                }
+                try { Thread.sleep(5_000) } catch (_: InterruptedException) { return@Thread }
+            }
+        }.apply { isDaemon = true; name = "launch-watchdog"; start() }
+
+        while (true) {
             val line = reader.readLine() ?: break          // EOF = process exited early
+            lastOutput.set(System.currentTimeMillis())
             onLog(line)
             line.substringAfter("WT_SESSION_USED ", "").trim().takeIf { it.isNotEmpty() }?.let {
                 rememberSessionType(activeDistro, SessionType.byId(it))
@@ -472,6 +490,13 @@ class LinuxEnvironment(context: Context) {
         const val VNC_PORT = 5901
 
         /** Human-readable byte size — the UI shows several of these. */
+        /**
+         * How long a launch may produce nothing at all before it is abandoned.
+         * Generous: apt is quiet for a while between packages, and the device
+         * is doing this on a phone.
+         */
+        private const val SILENCE_LIMIT_MS = 300_000L
+
         /** `[step] 3/7 Installing the XFCE desktop` — emitted by install-desktop.sh. */
         private val STEP_MARKER = Regex("""^\[step] (\d+)/(\d+) (.*)$""")
 

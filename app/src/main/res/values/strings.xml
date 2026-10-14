@@ -68,4 +68,6 @@
     <string name="session_log_header">— session log —</string>
     <string name="orphan_tagline">Installed when this system was still offered. It can only be removed now.</string>
     <string name="orphan_chip">No longer offered</string>
+    <string name="vnc_reconnecting">Connection lost (%3$s) — reconnecting, attempt %1$d of %2$d…</string>
+    <string name="vnc_lost_for_good">Could not reconnect to the desktop: %1$s. The session may still be running — close this view and launch again.</string>
 </resources>

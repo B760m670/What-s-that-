@@ -4,11 +4,15 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
+import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 
@@ -42,20 +46,72 @@ class VncActivity : AppCompatActivity() {
         }
         setContentView(root)
 
-        Toast.makeText(this, "Connecting to the desktop…", Toast.LENGTH_SHORT).show()
+        root.addView(status, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+            val m = (12 * resources.displayMetrics.density).toInt()
+            setMargins(m, m, m, m)
+        })
+
+        connect(host, port)
+        audio.start()   // play the desktop's sound through the phone speaker
+    }
+
+    /**
+     * A banner for what the connection is doing. The viewer used to say nothing
+     * when the socket went away: the canvas kept the last frame it had, which
+     * looks exactly like a desktop that has hung — and the desktop had not hung
+     * at all, only the connection to it had.
+     */
+    private val status: TextView by lazy {
+        TextView(this).apply {
+            setBackgroundColor(0xCC000000.toInt())
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            val p = (10 * resources.displayMetrics.density).toInt()
+            setPadding(p, p / 2, p, p / 2)
+            visibility = View.GONE
+        }
+    }
+
+    private var attempt = 0
+    private val ui = Handler(Looper.getMainLooper())
+
+    private fun connect(host: String, port: Int) {
+        client?.stop()
         client = VncClient(
             host = host,
             port = port,
-            onConnected = { _, _, bmp -> runOnUiThread { canvas.setFrame(bmp) } },
-            onFrame = { runOnUiThread { canvas.invalidate() } },
-            onError = { msg ->
-                runOnUiThread { if (!closing) Toast.makeText(this, "VNC: $msg", Toast.LENGTH_LONG).show() }
+            onConnected = { _, _, bmp ->
+                runOnUiThread {
+                    attempt = 0
+                    status.visibility = View.GONE
+                    canvas.setFrame(bmp)
+                }
             },
+            onFrame = { runOnUiThread { canvas.invalidate() } },
+            onError = { msg -> runOnUiThread { lost(host, port, msg) } },
         ).also {
             canvas.client = it
             it.start()
         }
-        audio.start()   // play the desktop's sound through the phone speaker
+    }
+
+    /**
+     * The session lives in the container and outlives any one connection to it,
+     * so a dropped socket is worth retrying rather than reporting as the end.
+     * Backs off, and eventually says so plainly instead of retrying forever.
+     */
+    private fun lost(host: String, port: Int, msg: String) {
+        if (closing || isFinishing) return
+        attempt++
+        if (attempt > MAX_RECONNECTS) {
+            status.text = getString(R.string.vnc_lost_for_good, msg)
+            status.visibility = View.VISIBLE
+            return
+        }
+        val delay = minOf(1000L shl (attempt - 1), 5000L)
+        status.text = getString(R.string.vnc_reconnecting, attempt, MAX_RECONNECTS, msg)
+        status.visibility = View.VISIBLE
+        ui.postDelayed({ if (!closing && !isFinishing) connect(host, port) }, delay)
     }
 
     /** Bottom-right floating controls: close session, then keyboard. Kept small
@@ -102,7 +158,10 @@ class VncActivity : AppCompatActivity() {
         }.apply { isDaemon = true; start() }
     }
 
+    private companion object { const val MAX_RECONNECTS = 8 }
+
     override fun onDestroy() {
+        ui.removeCallbacksAndMessages(null)
         client?.stop()
         audio.stop()
         super.onDestroy()

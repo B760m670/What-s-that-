@@ -31,6 +31,13 @@ SESSION_LOG=/tmp/wt-session.log
 export HOME=/root
 export XDG_RUNTIME_DIR=/tmp/runtime-root
 
+# Which system this rootfs actually is — asked of the rootfs, never assumed.
+DISTRO_ID="unknown"
+if [ -r /etc/os-release ]; then
+    . /etc/os-release
+    DISTRO_ID="${ID:-unknown}"
+fi
+
 # --- tear down whatever is on the display ------------------------------------
 #
 # Same criterion as kill-session.sh: under proot every guest process is a ptrace
@@ -165,6 +172,38 @@ ensure_packages() {   # $@ = package names
     done
 }
 
+# Ubuntu's own firefox and chromium packages are two-kilobyte stubs whose only
+# job is to install a snap — chromium-browser-l10n is literally 1.9 KB and
+# versioned "1snap1" — and snapd cannot run here: it needs systemd, squashfs
+# mounts and AppArmor. Mozilla publishes real .deb packages, arm64 included, so
+# that is where a Firefox that actually starts comes from.
+ensure_firefox() {
+    dpkg -s firefox >/dev/null 2>&1 && return 0
+    [ "$DISTRO_ID" = "ubuntu" ] || return 0
+
+    echo "[desktop] installing Firefox from Mozilla's repository (one-off, ~290 MB)..."
+    mkdir -p /etc/apt/keyrings
+    if ! curl -fsSL --max-time 60 \
+            https://packages.mozilla.org/apt/repo-signing-key.gpg \
+            -o /etc/apt/keyrings/packages.mozilla.org.asc; then
+        echo "[desktop] could not fetch Mozilla's signing key — skipping Firefox."
+        return 0
+    fi
+    echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main" \
+        > /etc/apt/sources.list.d/mozilla.list
+    # Ubuntu's stub carries a higher version number than Mozilla's real
+    # package, so without a pin apt would dutifully choose the snap again.
+    printf 'Package: *\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n' \
+        > /etc/apt/preferences.d/mozilla
+
+    if timeout 300 apt-get update >/dev/null 2>&1 &&
+       timeout 1800 apt-get install -y --no-install-recommends firefox >/dev/null 2>&1; then
+        echo "[desktop] Firefox installed."
+    else
+        echo "[desktop] Firefox could not be installed — the other browser still works."
+    fi
+}
+
 #   x11-utils          xwininfo, which is how we tell a drawn desktop from a
 #                      black screen; without it a failure is undiagnosable.
 #   libjxl-gdk-pixbuf  GNOME 46 ships its wallpapers as JPEG XL. With no loader
@@ -195,6 +234,7 @@ if [ "$DE" = "gnome" ]; then
     # interfaces it has no permission to touch on Android, and should not
     # succeed even if it could — the phone owns the network, not the container.
     ensure_packages upower accountsservice
+    ensure_firefox
 fi
 
 echo "[desktop] desktop: $DE"
@@ -328,9 +368,13 @@ WHALE=no
 # unknown and the process check stands alone.
 mapped_windows() {
     if ! have xwininfo; then echo unknown; return; fi
-    local out
+    local out n
     out=$(xwininfo -root -children -display ":$DISPLAY_NUM" 2>/dev/null) || { echo unknown; return; }
-    echo "$out" | grep -cE '^ +0x[0-9a-f]+' || echo 0
+    # grep -c exits 1 when the count is zero, so `grep -c ... || echo 0` printed
+    # the count AND a second zero — and "0\n0" is not "0", which made a black
+    # screen read as a success. Swallow the status, keep the number.
+    n=$(printf '%s\n' "$out" | grep -cE '^ +0x[0-9a-f]+' || true)
+    echo "${n:-0}"
 }
 
 # A desktop is "up" when its own process is running. gnome-session-failed is
@@ -669,7 +713,7 @@ fi
 # file actually defines — because an edit once removed four of these at once,
 # the file still parsed, CI stayed green, and the phone said
 # "wait_for_session: command not found" halfway through a launch.
-WT_REQUIRED_FUNCTIONS="read_field ensure_packages sweep_orphans sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus system_bus_answers wait_for_socket attempt start_audio"
+WT_REQUIRED_FUNCTIONS="read_field ensure_packages ensure_firefox sweep_orphans sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus system_bus_answers wait_for_socket attempt start_audio"
 for _f in $WT_REQUIRED_FUNCTIONS; do
     if ! declare -F "$_f" >/dev/null; then
         echo "[desktop] INTERNAL ERROR: this script is missing $_f. Not launching."

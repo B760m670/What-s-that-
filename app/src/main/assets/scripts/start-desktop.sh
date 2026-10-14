@@ -62,6 +62,34 @@ while [ -n "$_p" ] && [ "$_p" != 0 ] && [ "$_p" != 1 ]; do
     fi
 done
 
+# Processes left by an earlier launch whose proot has since exited are not
+# traced by anything any more, so the TracerPid sweep cannot see them: they were
+# reparented to init and outlive every cleanup. They still hold the display, and
+# one stale gnome-session-failed is enough to make this script report a fail
+# whale for a session that is working. Matching by name is wrong as a general
+# mechanism — that is why the sweep does not do it — but for clearing the
+# wreckage of previous launches it is exactly right, because these names are
+# unmistakably ours.
+sweep_orphans() {
+    local d c pid killed=0
+    for d in /proc/[0-9]*; do
+        pid=${d#/proc/}
+        case "$PROTECT" in *" $pid "*) continue ;; esac
+        [ -r "$d/cmdline" ] || continue
+        { c=$(<"$d/cmdline"); } 2>/dev/null || continue
+        case "$c" in
+            *gnome-shell*|*gnome-session*|*xfce4-session*|*xfwm4*|*openbox*|\
+            *Xtigervnc*|*Xvnc*|*Xwayland*|*gsd-*|*xdg-desktop-portal*|\
+            *tracker-miner*|*gvfsd*|*nautilus*|*dbus-daemon*)
+                kill -KILL "$pid" 2>/dev/null || true
+                killed=$((killed + 1)) ;;
+        esac
+    done
+    if [ "$killed" != 0 ]; then
+        echo "[desktop] cleared $killed leftover process(es) from an earlier launch."
+    fi
+}
+
 sweep() {   # $1 = signal
     local d pid
     for d in /proc/[0-9]*; do
@@ -80,6 +108,7 @@ vncserver -kill ":$DISPLAY_NUM" >/dev/null 2>&1 || true
 sweep TERM
 sleep 2 || true
 sweep KILL
+sweep_orphans
 rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}" 2>/dev/null || true
 rm -f "/root/.vnc/"*":${DISPLAY_NUM}.pid" 2>/dev/null || true
 
@@ -211,13 +240,16 @@ wait_for_session() {
     local i
     for i in 1 2 3 4 5 6 7 8 9 10; do
         sleep 2 || true
-        if [ "$WHALE" = yes ]; then return 1; fi
         if session_alive; then
             sleep 3 || true
-            session_alive || return 1
-            [ "$WHALE" = no ] || return 1
-            return 0
+            session_alive && return 0
+            return 1
         fi
+        # Only meaningful while the desktop is absent. A fail-whale process
+        # used to veto success even with the shell plainly running, and a
+        # single orphan left by an older build was then enough to condemn
+        # every launch afterwards.
+        if [ "$WHALE" = yes ]; then return 1; fi
     done
     return 1
 }
@@ -514,7 +546,7 @@ fi
 # file actually defines — because an edit once removed four of these at once,
 # the file still parsed, CI stayed green, and the phone said
 # "wait_for_session: command not found" halfway through a launch.
-WT_REQUIRED_FUNCTIONS="read_field sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus system_bus_answers wait_for_socket attempt start_audio"
+WT_REQUIRED_FUNCTIONS="read_field sweep_orphans sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus system_bus_answers wait_for_socket attempt start_audio"
 for _f in $WT_REQUIRED_FUNCTIONS; do
     if ! declare -F "$_f" >/dev/null; then
         echo "[desktop] INTERNAL ERROR: this script is missing $_f. Not launching."

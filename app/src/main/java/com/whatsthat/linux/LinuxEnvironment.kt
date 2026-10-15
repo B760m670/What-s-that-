@@ -167,7 +167,10 @@ class LinuxEnvironment(context: Context) {
             val am = appContext.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             val info = ActivityManager.MemoryInfo()
             am.getMemoryInfo(info)
-            val line = info.availMem.toString() + if (info.lowMemory) "|low" else ""
+            // Free bytes, how many processes the container is running, and
+            // whether Android called the device low — the three numbers that
+            // between them name every way a session has died so far.
+            val line = "${info.availMem},${guestProcessCount()}" + if (info.lowMemory) "|low" else ""
             memoryLog.parentFile?.mkdirs()
             // Rewritten rather than appended: it is a ring of a few dozen
             // readings, and it must never become another file that grows.
@@ -177,18 +180,42 @@ class LinuxEnvironment(context: Context) {
         }
     }
 
-    /** Every reading still on file, as (free bytes, Android called it low). */
-    private fun memorySamples(): List<Pair<Long, Boolean>> =
+    /**
+     * How many processes are running inside the container right now.
+     *
+     * Counted the same way the sweeps identify the guest: under proot every
+     * guest process is a ptrace tracee, and nothing else of ours is. The number
+     * matters because Android caps how many unmanaged child processes an app
+     * may have, and kills them when it is exceeded.
+     */
+    fun guestProcessCount(): Int = runCatching {
+        (File("/proc").listFiles() ?: return 0).count { d ->
+            d.isDirectory && d.name.all(Char::isDigit) && runCatching {
+                File(d, "status").bufferedReader().useLines { lines ->
+                    lines.firstOrNull { it.startsWith("TracerPid:") }
+                        ?.substringAfter(':')?.trim()?.toIntOrNull()?.let { it != 0 } ?: false
+                }
+            }.getOrDefault(false)
+        }
+    }.getOrDefault(0)
+
+    /** Every reading still on file: free bytes, guest processes, low flag. */
+    private fun memorySamples(): List<Triple<Long, Int, Boolean>> =
         runCatching {
             memoryLog.readLines().mapNotNull { line ->
                 val low = line.endsWith("|low")
-                line.removeSuffix("|low").trim().toLongOrNull()?.let { it to low }
+                val parts = line.removeSuffix("|low").trim().split(',')
+                val bytes = parts.getOrNull(0)?.toLongOrNull() ?: return@mapNotNull null
+                Triple(bytes, parts.getOrNull(1)?.toIntOrNull() ?: 0, low)
             }
         }.getOrDefault(emptyList())
 
+    /** The most processes the container was ever seen running. */
+    fun guestProcessPeak(): Int = memorySamples().maxOfOrNull { it.second } ?: 0
+
     /** The last few readings, newest last, ready to show. */
     fun memoryTrace(samples: Int = 6): List<String> =
-        memorySamples().takeLast(samples).map { (bytes, low) ->
+        memorySamples().takeLast(samples).map { (bytes, _, low) ->
             appContext.getString(
                 R.string.mem_sample,
                 formatBytes(bytes),
@@ -205,7 +232,7 @@ class LinuxEnvironment(context: Context) {
     fun memoryFloor(): Long? = memorySamples().minOfOrNull { it.first }
 
     /** Did Android ever flag the device as low on memory during the session? */
-    fun memoryEverLow(): Boolean = memorySamples().any { it.second }
+    fun memoryEverLow(): Boolean = memorySamples().any { it.third }
 
     /**
      * How the container's own process ended, as the kernel reported it to us.

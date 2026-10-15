@@ -95,6 +95,8 @@
     <string name="exit_signal">killed by signal %1$d.</string>
     <string name="exit_status">it exited with status %1$d.</string>
 
+    <string name="vnc_gone_phantom">A kill from outside with memory to spare points at one thing. Since Android 12 the system limits how many processes an app may run outside its own management — 32 for all apps together — and kills them outright when that is passed. This session was running %1$d. A desktop cannot get under that limit; an always-on service, which is one process, is nowhere near it.\n\nIt can be switched off, and that is the real fix. On the phone: Developer options → \"Disable child process restrictions\". From a computer: adb shell settings put global settings_enable_monitor_phantom_procs false</string>
+
     <!-- The always-on service (relay mode). -->
     <string name="action_service">Service</string>
     <string name="svc_title">Always-on service</string>

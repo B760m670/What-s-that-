@@ -225,6 +225,17 @@ class VncActivity : AppCompatActivity() {
             // own process ended.
             runCatching { env.sessionExitStatus() }.getOrNull()?.let { code ->
                 evidence += "\n\n" + getString(R.string.vnc_gone_exit, describeExit(code))
+                // SIGKILL with memory to spare has one well-known cause on
+                // Android 12 and later, and it is not this app's doing: the
+                // system caps how many processes an app may fork outside its
+                // own management — 32 across all apps — and SIGKILLs them when
+                // the cap is passed. A GNOME session is forty-odd processes on
+                // its own. Termux has the identical failure, down to the
+                // signal number, and the same fix.
+                if (code - 128 == 9 && (floor == null || floor > MEMORY_COMFORTABLE)) {
+                    val peak = runCatching { env.guestProcessPeak() }.getOrDefault(0)
+                    evidence += "\n\n" + getString(R.string.vnc_gone_phantom, peak)
+                }
             }
             // One signature in the log is decisive, and it is not "proot is
             // gone" — proot exits whenever the session ends, so finding it gone

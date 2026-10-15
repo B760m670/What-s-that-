@@ -707,6 +707,38 @@ class LinuxEnvironment(context: Context) {
         File(home, "tmp/wt-service/command").readText().trim().ifEmpty { null }
     }.getOrNull()
 
+    /**
+     * Run the fixer for Android's process cap inside the container.
+     *
+     * Everything hard happens in fix-process-limit.sh; this supplies what only
+     * the app can know — the ports, the pairing code, and its own package name
+     * so the script can grant it the permission on the way past. Returns true
+     * when the script reports the setting actually changed, not merely that it
+     * tried: the script re-reads it before saying so.
+     */
+    fun fixProcessLimit(
+        pairPort: Int,
+        pairCode: String,
+        connectPort: Int,
+        onLog: (String) -> Unit,
+    ): Boolean {
+        var ok = false
+        execScript(
+            "fix-process-limit.sh", insideContainer = true,
+            extraEnv = mapOf(
+                "WT_ADB_PAIR_PORT" to pairPort.toString(),
+                "WT_ADB_PAIR_CODE" to pairCode,
+                "WT_ADB_CONNECT_PORT" to if (connectPort > 0) connectPort.toString() else "",
+                "WT_APP_PKG" to appContext.packageName,
+            ),
+            onLog = { line ->
+                if (line.contains("[fix] RESULT ok")) ok = true
+                onLog(line)
+            },
+        )
+        return ok
+    }
+
     // --- internals -----------------------------------------------------------
 
     /** The running desktop/VNC session process (long-lived), if started. */

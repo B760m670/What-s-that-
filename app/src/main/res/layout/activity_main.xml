@@ -137,6 +137,51 @@
             </com.google.android.material.card.MaterialCardView>
 
             <!--
+                Android's process cap. Hidden unless it is actually in force,
+                because a warning that is always there is furniture: this one
+                appears only on devices where it is the reason sessions die,
+                and goes away for good once it has been dealt with.
+            -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/limitCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:visibility="gone"
+                app:cardCornerRadius="18dp"
+                app:cardElevation="0dp"
+                app:strokeWidth="1dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        style="@style/Text.WT.Section"
+                        android:text="@string/cap_card_title" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        style="@style/Text.WT.Caption"
+                        android:text="@string/cap_card_body" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/limitButton"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:text="@string/cap_card_action" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!--
                 Quick actions, two to a row. They were one row of three; the
                 fourth made four labels share a phone's width, and four
                 ellipsised buttons tell the user nothing.

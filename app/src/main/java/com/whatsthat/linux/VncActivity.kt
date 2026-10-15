@@ -225,6 +225,17 @@ class VncActivity : AppCompatActivity() {
             // own process ended.
             runCatching { env.sessionExitStatus() }.getOrNull()?.let { code ->
                 evidence += "\n\n" + getString(R.string.vnc_gone_exit, describeExit(code))
+                // A kill from outside, with memory ruled out, leaves one
+                // measurable candidate: Android's cap on how many processes an
+                // app may run outside its own management. State the count and
+                // the cap; do not argue from either.
+                if (code - 128 == 9) {
+                    val last = runCatching { env.guestProcessLast() }.getOrDefault(0)
+                    val peak = runCatching { env.guestProcessPeak() }.getOrDefault(0)
+                    if (peak > 0) {
+                        evidence += "\n\n" + getString(R.string.vnc_gone_processes, last, peak)
+                    }
+                }
             }
             // One signature in the log is decisive, and it is not "proot is
             // gone" — proot exits whenever the session ends, so finding it gone

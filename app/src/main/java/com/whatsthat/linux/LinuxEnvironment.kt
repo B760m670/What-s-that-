@@ -228,6 +228,19 @@ class LinuxEnvironment(context: Context) {
      */
     fun memoryFloor(): Long? = memorySamples().minOfOrNull { it.first }
 
+    /**
+     * How many processes the container was running, at its peak and at the
+     * last reading before it died.
+     *
+     * Android caps an app's unmanaged child processes at 32 across all apps and
+     * kills them when that is passed — which is the remaining candidate for a
+     * SIGKILL that memory cannot explain. The number settles it either way, and
+     * after being wrong three times about this, the number is the point.
+     */
+    fun guestProcessPeak(): Int = memorySamples().maxOfOrNull { it.second } ?: 0
+
+    fun guestProcessLast(): Int = memorySamples().lastOrNull { it.second > 0 }?.second ?: 0
+
     /** Did Android ever flag the device as low on memory during the session? */
     fun memoryEverLow(): Boolean = memorySamples().any { it.third }
 
@@ -440,6 +453,7 @@ class LinuxEnvironment(context: Context) {
     fun startDesktop(geometry: String, onLog: (String) -> Unit): String? {
         stopDesktop()
         runCatching { File(home, "tmp/wt-session.exit").delete() }   // last session's verdict
+        runCatching { memoryLog.delete() }                          // and its readings
         val pb = ProcessBuilder(containerCommand("start-desktop.sh")).redirectErrorStream(true)
         configureEnv(pb, desktopEnvVars() + mapOf("WT_GEOMETRY" to geometry))
         val process = pb.start()

@@ -204,6 +204,14 @@ rm -f "$SESSION_LOG" 2>/dev/null || true
 #
 # /run/systemd/resolve is deliberately left alone — Ubuntu's /etc/resolv.conf
 # is a symlink into it, and removing it would take DNS down with it.
+# Name the proot that traces this session. Everything in the container runs
+# behind this one process, and when a session dies of ENOSYS and SIGSYS it is
+# this pid that was not there any more — so having it in the log makes the next
+# report legible. (Checking afterwards whether it is still alive would prove
+# nothing: it exits with its last tracee either way.)
+read_field /proc/self/status "TracerPid:" || FIELD=0
+echo "[desktop] this session runs under proot ${FIELD}."
+
 for _fake in /run/systemd/seats /run/systemd/system; do
     if [ -e "$_fake" ]; then
         rm -rf "$_fake" 2>/dev/null || true

@@ -78,6 +78,7 @@
     <string name="vnc_gone_crashed">The X server crashed — its own error is in the log below.</string>
     <string name="vnc_gone_killed">The X server left no error behind, so it did not crash: something killed it. On a phone that is almost always the system reclaiming memory, and it happens under heavy work — a package upgrade, or a video playing.</string>
     <string name="resolution_matched">%1$s — shaped like this screen</string>
+    <string name="vnc_gone_tracer">The log contains a read that failed with \"Function not implemented\", which cannot happen on a healthy system: it is what the kernel does when the process tracing the container has gone. So the session did not fail on its own — the floor was taken out from under it, and the thing to explain is why proot was killed, not why the desktop crashed.</string>
     <string name="vnc_gone_memory">Free memory while the session was running, oldest first:\n%1$s\n\nIf it was falling towards zero, memory is the answer. If it was not, something else ended the session and memory is not the explanation.</string>
     <string name="mem_sample">%1$s free%2$s</string>
     <string name="mem_low"> (low)</string>

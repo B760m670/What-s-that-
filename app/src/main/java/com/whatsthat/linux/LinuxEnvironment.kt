@@ -587,14 +587,29 @@ class LinuxEnvironment(context: Context) {
     fun isServiceProcessLive(): Boolean = runCatching {
         val dir = File(home, "tmp/wt-service")
         val pid = File(dir, "pid").readText().trim().toLongOrNull() ?: return false
-        val start = File(dir, "start").readText().trim()
+        processAlive(pid, File(dir, "start").readText().trim())
+    }.getOrDefault(false)
+
+    /**
+     * Is this exactly the process that was recorded, still running?
+     *
+     * Pids are recycled, so "the directory exists" is not an answer. Field 22 of
+     * /proc/<pid>/stat is the process's start time, and pid plus start time is
+     * an identity. The comm field (2) can contain spaces and parentheses, so it
+     * is cut off at its closing ")" rather than split blindly.
+     */
+    private fun processAlive(pid: Long, startTime: String): Boolean {
         val stat = File("/proc/$pid/stat")
         if (!stat.canRead()) return false
-        // Field 22 is the start time; the comm field (2) can hold spaces and
-        // parentheses, so cut at its closing ")" instead of splitting blindly.
-        val fields = stat.readText().substringAfter(") ").trim().split(" ")
-        start.isEmpty() || fields.getOrNull(19) == start
-    }.getOrDefault(false)
+        if (startTime.isEmpty()) return true
+        val fields = runCatching { stat.readText() }.getOrNull() ?: return false
+        return fields.substringAfter(") ").trim().split(" ").getOrNull(19) == startTime
+    }
+
+    // Deliberately absent: a check for whether the session's proot is still
+    // alive. It is always gone after a session ends — it exits with its last
+    // tracee — so finding it gone afterwards distinguishes nothing. What does
+    // distinguish is in the log; see the ENOSYS signature in VncActivity.
 
     /**
      * Stop the relay, and nothing else.

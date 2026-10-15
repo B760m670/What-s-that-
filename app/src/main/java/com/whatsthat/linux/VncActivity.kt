@@ -199,13 +199,30 @@ class VncActivity : AppCompatActivity() {
             }
             // "Something killed it" is a hypothesis, and until now nothing here
             // tested it. The service samples free memory while a session is up,
-            // so the last readings before the silence either support it or rule
-            // it out — and ruling it out matters just as much, because then the
+            // so the last readings before the end either support it or rule it
+            // out — and ruling it out matters just as much, because then the
             // cause is something else entirely and memory has been a red
             // herring for three sessions running.
+            //
+            // Shown for a crash too, which the first version of this got wrong:
+            // a crash whose first symptoms are ENOSYS and SIGSYS is not the
+            // guest's own fault, and then what happened to memory is the whole
+            // question rather than an irrelevance.
             val trace = runCatching { env.memoryTrace() }.getOrDefault(emptyList())
-            val evidence = if (crashed || trace.isEmpty()) ""
+            var evidence = if (trace.isEmpty()) ""
                            else "\n\n" + getString(R.string.vnc_gone_memory, trace.joinToString("  →  "))
+            // One signature in the log is decisive, and it is not "proot is
+            // gone" — proot exits whenever the session ends, so finding it gone
+            // afterwards proves nothing either way. What cannot happen on a
+            // healthy system is a plain read() of an established socket failing
+            // with ENOSYS. That is the documented behaviour of a seccomp filter
+            // returning SECCOMP_RET_TRACE with no tracer present: the call is
+            // not executed at all. Seeing it means the tracer was gone while
+            // the guest was still running — the floor removed from under it —
+            // rather than the guest failing on its own.
+            if (tail.any { it.contains("Function not implemented") }) {
+                evidence = "\n\n" + getString(R.string.vnc_gone_tracer) + evidence
+            }
             val detail = if (tail.isEmpty()) verdict + evidence
                          else verdict + evidence + "\n\n" + tail.joinToString("\n")
             runOnUiThread {

@@ -138,6 +138,14 @@ class MainActivity : AppCompatActivity() {
                     !env.isBootstrapped -> Step.BOOTSTRAP to env.bootstrap(::appendLog, ::showProgress)
                     !env.isDesktopInstalled -> Step.DESKTOP to env.installDesktop(::appendLog, ::showProgress)
                     else -> {
+                        // The foreground service goes up BEFORE the container is
+                        // forked, not after. Android kills by oom_score_adj, and
+                        // a child inherits its parent's value at fork time — so
+                        // starting the service afterwards, as this used to, left
+                        // the whole session with whatever standing the app
+                        // happened to have when proot was spawned. It also takes
+                        // the wake lock, so the CPU does not sleep under it.
+                        startSessionService()
                         endpoint = env.startDesktop(resolution, ::appendLog)
                         Step.LAUNCH to (if (endpoint != null) 0 else 1)
                     }
@@ -189,11 +197,15 @@ class MainActivity : AppCompatActivity() {
         val host = parts.getOrElse(0) { "127.0.0.1" }
         val port = parts.getOrNull(1)?.toIntOrNull() ?: LinuxEnvironment.VNC_PORT
         appendLog("Opening desktop viewer ($host:$port)…")
-        // A foreground-service failure must not block the viewer from opening.
-        runCatching { ContextCompat.startForegroundService(this, Intent(this, LinuxSessionService::class.java)) }
-            .onFailure { appendLog("(session service not started: ${it.message})") }
+        startSessionService()   // no-op if it is already up; needed when resuming
         runCatching { VncActivity.start(this, host, port) }
             .onFailure { appendLog("Could not open viewer: ${it.message}") }
+    }
+
+    /** A foreground-service failure must never block the desktop from starting. */
+    private fun startSessionService() {
+        runCatching { ContextCompat.startForegroundService(this, Intent(this, LinuxSessionService::class.java)) }
+            .onFailure { appendLog("(session service not started: ${it.message})") }
     }
 
     /**

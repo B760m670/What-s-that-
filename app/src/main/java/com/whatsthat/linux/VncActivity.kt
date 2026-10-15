@@ -179,10 +179,21 @@ class VncActivity : AppCompatActivity() {
         status.visibility = View.VISIBLE
         Thread {
             val tail = runCatching { env.vncServerLog() }.getOrDefault(emptyList())
-            val detail = if (tail.isEmpty())
-                getString(R.string.vnc_gone_no_log)
-            else
-                tail.joinToString("\n")
+            // A crash says so. The X server writes "Fatal server error" and a
+            // backtrace on its way down, every time. Its absence is not missing
+            // information — it is the information: a process that vanishes
+            // without a word was killed, and on a phone that means the system
+            // took the memory back.
+            val crashed = tail.any {
+                it.contains("Fatal server error") || it.contains("Caught signal")
+            }
+            val verdict = when {
+                tail.isEmpty() -> getString(R.string.vnc_gone_no_log)
+                crashed -> getString(R.string.vnc_gone_crashed)
+                else -> getString(R.string.vnc_gone_killed)
+            }
+            val detail = if (tail.isEmpty()) verdict
+                         else verdict + "\n\n" + tail.joinToString("\n")
             runOnUiThread {
                 if (closing || isFinishing) return@runOnUiThread
                 androidx.appcompat.app.AlertDialog.Builder(this)

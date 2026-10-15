@@ -381,11 +381,28 @@ class LinuxEnvironment(context: Context) {
      * Cheap enough to poll on resume, but it does touch the network stack, so
      * callers keep it off the main thread.
      */
+    /**
+     * Whether the desktop is up, answered by looking for its process rather
+     * than by connecting to it.
+     *
+     * Connecting was the obvious way and it showed up in the server's own log
+     * as a client that attached and left without asking for a single frame —
+     * one accept() per refresh of the main screen, for a question we can answer
+     * without touching the socket at all. That matters beyond tidiness: an
+     * accept() is where the X server was killed with SIGSYS once already.
+     *
+     * Android mounts /proc with hidepid, so this sees only this app's own
+     * processes — which is exactly the set the session belongs to.
+     */
     fun isSessionRunning(): Boolean = runCatching {
-        java.net.Socket().use {
-            it.connect(java.net.InetSocketAddress("127.0.0.1", VNC_PORT), 250)
-            true
-        }
+        File("/proc").listFiles { f -> f.isDirectory && f.name.all(Char::isDigit) }
+            .orEmpty()
+            .any { dir ->
+                runCatching {
+                    val cmd = File(dir, "cmdline").readBytes().toString(Charsets.ISO_8859_1)
+                    cmd.contains("Xtigervnc") || cmd.contains("Xvnc")
+                }.getOrDefault(false)
+            }
     }.getOrDefault(false)
 
     /** Loopback endpoint of a running session, for reconnecting to it. */

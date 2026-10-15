@@ -109,7 +109,7 @@ class VncActivity : AppCompatActivity() {
         // times over tells the user nothing they cannot already see, so stop and
         // show what the server said on its way out.
         if (msg.contains("ECONNREFUSED") || msg.contains("Connection refused")) {
-            showGone(msg)
+            showGone(host, port, msg)
             return
         }
 
@@ -173,7 +173,7 @@ class VncActivity : AppCompatActivity() {
      * write before it went — including the silence that means it was killed
      * rather than crashed.
      */
-    private fun showGone(msg: String) {
+    private fun showGone(host: String, port: Int, msg: String) {
         if (closing || isFinishing) return
         status.text = getString(R.string.vnc_desktop_gone)
         status.visibility = View.VISIBLE
@@ -188,11 +188,35 @@ class VncActivity : AppCompatActivity() {
                 androidx.appcompat.app.AlertDialog.Builder(this)
                     .setTitle(R.string.vnc_desktop_gone)
                     .setMessage("$msg\n\n$detail")
-                    .setPositiveButton(android.R.string.ok) { _, _ -> finish() }
+                    // The desktop died; the viewer is still the screen the user
+                    // is looking at. Making them back out and find a button on
+                    // another screen is friction for no reason.
+                    .setPositiveButton(R.string.vnc_relaunch) { _, _ -> relaunch(host, port) }
+                    .setNegativeButton(android.R.string.cancel) { _, _ -> finish() }
                     .setCancelable(true)
                     .show()
             }
         }.apply { isDaemon = true; start() }
+    }
+
+    /** Start a fresh session and connect to it, without leaving the viewer. */
+    private fun relaunch(host: String, port: Int) {
+        status.text = getString(R.string.vnc_relaunching)
+        status.visibility = View.VISIBLE
+        val geometry = getSharedPreferences("wt", MODE_PRIVATE)
+            .getString("geometry", "1280x720") ?: "1280x720"
+        Thread {
+            val endpoint = runCatching { env.startDesktop(geometry) {} }.getOrNull()
+            runOnUiThread {
+                if (closing || isFinishing) return@runOnUiThread
+                if (endpoint != null) {
+                    attempt = 0
+                    connect(host, port)
+                } else {
+                    status.text = getString(R.string.vnc_relaunch_failed)
+                }
+            }
+        }.apply { isDaemon = true; name = "vnc-relaunch"; start() }
     }
 
     override fun onDestroy() {

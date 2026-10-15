@@ -136,7 +136,11 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- Quick actions -->
+            <!--
+                Quick actions, two to a row. They were one row of three; the
+                fourth made four labels share a phone's width, and four
+                ellipsised buttons tell the user nothing.
+            -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -159,6 +163,13 @@
                     android:layout_weight="1"
                     android:layout_marginStart="8dp"
                     android:text="@string/action_desktop" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/resolutionButton"
@@ -166,8 +177,16 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:layout_marginStart="8dp"
                     android:text="@string/action_resolution" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/serviceButton"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="8dp"
+                    android:text="@string/action_service" />
             </LinearLayout>
 
             <!-- Console, collapsed by default -->

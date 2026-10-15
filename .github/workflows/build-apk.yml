@@ -59,6 +59,14 @@ jobs:
         # file parses; this proves the functions it says it needs exist.
         run: python3 tools/check-scripts.py
 
+      - name: Check that the sweeps spare the always-on service
+        # The sweeps decide what "closing a session" kills. The always-on
+        # service is a ptrace tracee exactly like a desktop process, so the
+        # difference between closing a desktop and killing the user's relay is
+        # a handful of lines — and on a device the only way to try it is to
+        # lose the relay. This runs the real functions against a fake /proc.
+        run: bash tools/test-relay-exemption.sh
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:

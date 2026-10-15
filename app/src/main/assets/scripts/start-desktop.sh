@@ -58,6 +58,50 @@ read_field() {   # $1=file  $2=field prefix
     return 1
 }
 
+# Field 22 of /proc/<pid>/stat — a process's start time, which together with the
+# pid is an identity that survives pid reuse. The comm field can contain spaces
+# and parentheses, so it is cut off at its closing ")" rather than parsed.
+START_TIME=""
+read_starttime() {   # $1 = pid
+    START_TIME=""
+    local line rest
+    [ -r "/proc/$1/stat" ] || return 1
+    read -r line < "/proc/$1/stat" || return 1
+    rest=${line#*") "}
+    # shellcheck disable=SC2086  # deliberate word splitting into positionals
+    set -- $rest
+    START_TIME="${20:-}"
+    [ -n "$START_TIME" ]
+}
+
+# The always-on service must survive a desktop launch. It is a tracee like every
+# other guest process, so the sweep below would clear it along with the display
+# — and then the relay would go down every time someone opened the desktop to
+# look at it, which is precisely when the user is watching.
+#
+# service-run.sh records the proot instance that traces it; one tracer names its
+# whole process tree. Everything recorded is re-verified here, because a file
+# left by a relay that has since died must not spare whatever process later
+# inherited its pid — that would leave a stale session holding display :1, which
+# is the failure this sweep exists to prevent.
+SPARE_TRACER=0
+load_spare_tracer() {
+    SPARE_TRACER=0
+    local dir=/tmp/wt-service tracer pid start
+    [ -r "$dir/tracer" ] && [ -r "$dir/pid" ] || return 0
+    read -r tracer < "$dir/tracer" || return 0
+    read -r pid < "$dir/pid" || return 0
+    [ -n "$tracer" ] && [ "$tracer" != 0 ] && [ -n "$pid" ] || return 0
+    read_field "/proc/$pid/status" "TracerPid:" 2>/dev/null || return 0
+    [ "$FIELD" = "$tracer" ] || return 0
+    if [ -r "$dir/start" ] && read -r start < "$dir/start" && [ -n "$start" ]; then
+        read_starttime "$pid" || return 0
+        [ "$START_TIME" = "$start" ] || return 0
+    fi
+    SPARE_TRACER="$tracer"
+    echo "[desktop] the always-on service is running (proot $tracer) — leaving it alone."
+}
+
 PROTECT=" $$ "
 _p=$$
 while [ -n "$_p" ] && [ "$_p" != 0 ] && [ "$_p" != 1 ]; do
@@ -82,6 +126,9 @@ sweep_orphans() {
     for d in /proc/[0-9]*; do
         pid=${d#/proc/}
         case "$PROTECT" in *" $pid "*) continue ;; esac
+        if [ "$SPARE_TRACER" != 0 ] && read_field "$d/status" "TracerPid:" 2>/dev/null; then
+            if [ "$FIELD" = "$SPARE_TRACER" ]; then continue; fi
+        fi
         [ -r "$d/cmdline" ] || continue
         { c=$(<"$d/cmdline"); } 2>/dev/null || continue
         case "$c" in
@@ -105,12 +152,14 @@ sweep() {   # $1 = signal
         [ -r "$d/status" ] || continue
         if read_field "$d/status" "TracerPid:" 2>/dev/null; then
             if [ "$FIELD" != 0 ]; then
+                if [ "$SPARE_TRACER" != 0 ] && [ "$FIELD" = "$SPARE_TRACER" ]; then continue; fi
                 kill -"$1" "$pid" 2>/dev/null || true
             fi
         fi
     done
 }
 
+load_spare_tracer
 vncserver -kill ":$DISPLAY_NUM" >/dev/null 2>&1 || true
 sweep TERM
 sleep 2 || true
@@ -802,7 +851,7 @@ fi
 # file actually defines — because an edit once removed four of these at once,
 # the file still parsed, CI stayed green, and the phone said
 # "wait_for_session: command not found" halfway through a launch.
-WT_REQUIRED_FUNCTIONS="read_field ensure_apt_lists ensure_packages ensure_firefox tune_firefox sweep_orphans sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus system_bus_answers wait_for_socket attempt start_audio"
+WT_REQUIRED_FUNCTIONS="read_field read_starttime load_spare_tracer ensure_apt_lists ensure_packages ensure_firefox tune_firefox sweep_orphans sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus system_bus_answers wait_for_socket attempt start_audio"
 for _f in $WT_REQUIRED_FUNCTIONS; do
     if ! declare -F "$_f" >/dev/null; then
         echo "[desktop] INTERNAL ERROR: this script is missing $_f. Not launching."

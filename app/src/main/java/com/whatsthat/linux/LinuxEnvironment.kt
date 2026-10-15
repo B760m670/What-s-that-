@@ -467,6 +467,91 @@ class LinuxEnvironment(context: Context) {
         return exec(cmd, emptyMap(), onLog)
     }
 
+    // --- the always-on service ------------------------------------------------
+    //
+    // A relay is not a desktop. It has no window, nobody watches it, and it is
+    // supposed to still be there tomorrow — which makes almost every assumption
+    // the desktop path is built on wrong for it. It gets its own command, its
+    // own supervision and its own lifetime.
+
+    var serviceEnabled: Boolean
+        get() = prefs.getBoolean("relay_enabled", false)
+        set(v) { prefs.edit().putBoolean("relay_enabled", v).apply() }
+
+    var serviceCommand: String
+        get() = prefs.getString("relay_command", "") ?: ""
+        set(v) { prefs.edit().putString("relay_command", v.trim()).apply() }
+
+    /**
+     * Where the supervised command's output goes.
+     *
+     * This is the container's own `/tmp/wt-service/log` seen from the host side:
+     * the relay writes to a file rather than to a pipe, so that nothing it
+     * prints depends on this app being alive to read it. The supervisor's own
+     * notes are appended to the same file, which keeps one chronological record
+     * of a thing that is meant to run for weeks.
+     */
+    val serviceLogFile: File get() = File(home, "tmp/wt-service/log")
+
+    fun serviceLog(maxLines: Int = 200): List<String> =
+        runCatching { serviceLogFile.readLines().takeLast(maxLines) }.getOrDefault(emptyList())
+
+    /**
+     * Start the configured command inside the container and hand back the
+     * process, still running. Unlike [runCommand] this does not wait: the whole
+     * point is that it outlives the call.
+     *
+     * It goes through service-run.sh rather than straight to bash, because the
+     * command has to be registered inside the container before it runs. Without
+     * that registration the next desktop launch — or close — sweeps it away with
+     * everything else in the guest; see the script for why that sweep cannot
+     * simply be made gentler.
+     */
+    fun startServiceProcess(): Process? {
+        val cmd = serviceCommand
+        if (cmd.isBlank() || !isBootstrapped) return null
+        val pb = ProcessBuilder(containerCommand("service-run.sh")).redirectErrorStream(true)
+        configureEnv(pb, desktopEnvVars() + mapOf("WT_SERVICE_CMD" to cmd))
+        return runCatching { pb.start() }.getOrNull()
+    }
+
+    /**
+     * Is the registered service process still alive?
+     *
+     * Asked of the container's own registration, not of our [Process] handle:
+     * after the app is restarted — by the user, or by Android reclaiming it —
+     * the handle is gone while the relay itself may well still be running, and
+     * answering "no" then would start a second copy.
+     */
+    fun isServiceProcessLive(): Boolean = runCatching {
+        val dir = File(home, "tmp/wt-service")
+        val pid = File(dir, "pid").readText().trim().toLongOrNull() ?: return false
+        val start = File(dir, "start").readText().trim()
+        val stat = File("/proc/$pid/stat")
+        if (!stat.canRead()) return false
+        // Field 22 is the start time; the comm field (2) can hold spaces and
+        // parentheses, so cut at its closing ")" instead of splitting blindly.
+        val fields = stat.readText().substringAfter(") ").trim().split(" ")
+        start.isEmpty() || fields.getOrNull(19) == start
+    }.getOrDefault(false)
+
+    /**
+     * Stop the relay, and nothing else.
+     *
+     * Not by destroying our handle: that handle is the proot tracing the relay,
+     * and killing a tracer leaves its tracees orphaned mid-syscall. The script
+     * signals the tracees instead, and leaves any desktop session alone.
+     */
+    fun stopServiceProcess(onLog: (String) -> Unit = {}): Int = runCatching {
+        if (!rootfsReady(activeDistro)) 0
+        else execScript("service-stop.sh", insideContainer = true, onLog = onLog)
+    }.getOrDefault(1)
+
+    /** What the relay was last started with, as recorded inside the container. */
+    fun runningServiceCommand(): String? = runCatching {
+        File(home, "tmp/wt-service/command").readText().trim().ifEmpty { null }
+    }.getOrNull()
+
     // --- internals -----------------------------------------------------------
 
     /** The running desktop/VNC session process (long-lived), if started. */

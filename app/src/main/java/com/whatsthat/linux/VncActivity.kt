@@ -162,7 +162,12 @@ class VncActivity : AppCompatActivity() {
             runCatching { env.prepareScripts() }   // ensure kill-session.sh is present
             runCatching { env.killSession {} }
             runOnUiThread {
-                runCatching { stopService(Intent(this, LinuxSessionService::class.java)) }
+                // Tell the service the desktop is gone; do NOT stop it. It used
+                // to be stopped outright here, which also ended the always-on
+                // service — so closing a desktop window killed a relay that had
+                // nothing to do with it. The service now decides for itself
+                // whether anything is left to keep alive.
+                runCatching { LinuxSessionService.send(this, LinuxSessionService.ACTION_DESKTOP_DOWN) }
                 finish()
             }
         }.apply { isDaemon = true; start() }

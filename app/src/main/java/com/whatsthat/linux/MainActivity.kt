@@ -4,6 +4,7 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.os.Bundle
 import android.view.View
+import android.widget.ScrollView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -46,6 +47,7 @@ class MainActivity : AppCompatActivity() {
         binding.distrosButton.setOnClickListener { startActivity(Intent(this, DistrosActivity::class.java)) }
         binding.desktopButton.setOnClickListener { chooseDesktop() }
         binding.resolutionButton.setOnClickListener { chooseResolution() }
+        binding.serviceButton.setOnClickListener { configureService() }
         binding.runButton.setOnClickListener { runConsoleCommand() }
         binding.cmdInput.setOnEditorActionListener { _, _, _ -> runConsoleCommand(); true }
         binding.consoleHeader.setOnClickListener { toggleConsole() }
@@ -104,6 +106,12 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             if (running) addChip(getString(R.string.chip_session_running), R.color.state_ready)
+            // The relay is the one thing here that can be running while nothing
+            // is on screen, so the card has to say so — otherwise the only way
+            // to know is the notification shade.
+            if (withContext(Dispatchers.IO) { env.isServiceProcessLive() }) {
+                addChip(getString(R.string.svc_running), R.color.state_ready)
+            }
             if (size > 0) addChip(LinuxEnvironment.formatBytes(size), R.color.state_absent)
 
             // A live session means the desktop is already up: offer to return to
@@ -204,8 +212,112 @@ class MainActivity : AppCompatActivity() {
 
     /** A foreground-service failure must never block the desktop from starting. */
     private fun startSessionService() {
-        runCatching { ContextCompat.startForegroundService(this, Intent(this, LinuxSessionService::class.java)) }
+        runCatching { LinuxSessionService.send(this, LinuxSessionService.ACTION_DESKTOP_UP) }
             .onFailure { appendLog("(session service not started: ${it.message})") }
+    }
+
+    // --- the always-on service ------------------------------------------------
+
+    /**
+     * The relay: one command the device keeps running whether or not anyone is
+     * looking at it.
+     *
+     * Everything here is deliberately one dialog. The feature's whole promise is
+     * that it needs no attention, so the interface for it is a command, a
+     * switch, and an honest answer to "is it running right now".
+     */
+    private fun configureService() {
+        val view = layoutInflater.inflate(R.layout.dialog_service, null)
+        val cmd = view.findViewById<android.widget.EditText>(R.id.svcCommand)
+        val on = view.findViewById<android.widget.CompoundButton>(R.id.svcEnabled)
+        val status = view.findViewById<android.widget.TextView>(R.id.svcStatus)
+        val battery = view.findViewById<View>(R.id.svcBattery)
+        val log = view.findViewById<android.widget.TextView>(R.id.svcLog)
+        val logScroll = view.findViewById<ScrollView>(R.id.svcLogScroll)
+
+        cmd.setText(env.serviceCommand)
+        on.isChecked = env.serviceEnabled
+
+        fun render() {
+            val live = env.isServiceProcessLive()
+            status.text = when {
+                !env.isBootstrapped -> getString(R.string.svc_state_not_installed)
+                live -> getString(R.string.svc_state_running)
+                !env.serviceEnabled -> getString(R.string.svc_state_off)
+                cmd.text.isBlank() -> getString(R.string.svc_state_no_command)
+                else -> getString(R.string.svc_state_enabled)
+            }
+            val lines = env.serviceLog(300)
+            log.text = if (lines.isEmpty()) getString(R.string.svc_log_empty) else lines.joinToString("\n")
+            logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
+            // Only shown when it would change something: asking for an exemption
+            // that is already granted is noise that teaches the user to ignore it.
+            battery.visibility = if (batteryExempt()) View.GONE else View.VISIBLE
+        }
+        render()
+        battery.setOnClickListener { requestBatteryExemption() }
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.svc_title)
+            .setView(view)
+            .setPositiveButton(R.string.svc_apply) { _, _ ->
+                val wanted = on.isChecked
+                val command = cmd.text.toString().trim()
+                env.serviceCommand = command
+                val was = env.serviceEnabled
+                env.serviceEnabled = wanted && command.isNotEmpty()
+
+                if (env.serviceEnabled) {
+                    // Started here, not on the next launch: the point of the
+                    // switch is that it takes effect and keeps effect.
+                    LinuxSessionService.send(this, LinuxSessionService.ACTION_SERVICE_START)
+                    appendLog(getString(R.string.svc_started) + " $command")
+                    if (!batteryExempt()) promptBatteryExemption()
+                } else if (was) {
+                    LinuxSessionService.send(this, LinuxSessionService.ACTION_STOP_SERVICE)
+                    appendLog(getString(R.string.svc_stopped))
+                }
+                refreshState()
+            }
+            .setNeutralButton(R.string.svc_refresh) { _, _ -> configureService() }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun batteryExempt(): Boolean = runCatching {
+        val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
+        android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M ||
+            pm.isIgnoringBatteryOptimizations(packageName)
+    }.getOrDefault(true)
+
+    /**
+     * Doze is the quiet killer of an always-on service: the process stays, the
+     * notification stays, and the network simply stops for hours. Nothing in the
+     * app can work around it, so the user is asked once, at the moment the
+     * reason for asking is on screen.
+     */
+    private fun promptBatteryExemption() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.svc_battery_action)
+            .setMessage(R.string.svc_battery_note)
+            .setPositiveButton(R.string.svc_battery_action) { _, _ -> requestBatteryExemption() }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun requestBatteryExemption() {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) return
+        // The direct request needs the permission declared and is not offered on
+        // every build of Android; the battery-settings screen is the fallback
+        // that always exists.
+        val direct = Intent(
+            android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+            android.net.Uri.parse("package:$packageName"),
+        )
+        val fallback = Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        runCatching { startActivity(direct) }
+            .recoverCatching { startActivity(fallback) }
+            .onFailure { appendLog("Could not open the battery settings: ${it.message}") }
     }
 
     /**

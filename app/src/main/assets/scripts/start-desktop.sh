@@ -121,6 +121,57 @@ done
 # mechanism — that is why the sweep does not do it — but for clearing the
 # wreckage of previous launches it is exactly right, because these names are
 # unmistakably ours.
+# Suppress the autostart entries that cannot work here and cost a process each.
+#
+# A desktop session starts whatever /etc/xdg/autostart lists: a keyring daemon
+# (three processes), a screensaver, a power manager for a battery it cannot
+# see, a polkit agent with no polkit, a Bluetooth applet, a printing applet, a
+# geolocation agent, a search indexer. On a desktop computer that is reasonable.
+# Here each one is a process out of an allowance of 32, and none of them does
+# anything a user of this will miss.
+#
+# The mechanism is the standard one: a .desktop file of the same name in the
+# user's autostart directory with Hidden=true overrides the system's copy. No
+# packages are removed and nothing is deleted, so undoing it is deleting a
+# directory.
+trim_autostart() {
+    local dir=/root/.config/autostart name
+    mkdir -p "$dir" 2>/dev/null || return 0
+    for name in \
+        gnome-keyring-pkcs11 gnome-keyring-secrets gnome-keyring-ssh \
+        at-spi-dbus-bus \
+        xfce4-screensaver light-locker xscreensaver gnome-screensaver \
+        xfce4-power-manager gnome-power-manager \
+        xfce-polkit polkit-gnome-authentication-agent-1 \
+        blueman print-applet gnome-printers-applet \
+        geoclue-demo-agent \
+        tracker-miner-fs-3 tracker-extract-3 tracker-miner-rss-3 \
+        snap-userd-autostart \
+        xdg-user-dirs user-dirs-update-gtk \
+        orca-autostart im-launch \
+        thunar Thunar \
+        xfce4-clipman-plugin xapp-sn-watcher nm-applet spice-vdagent \
+        gnome-software-service update-notifier \
+        ; do
+        printf '[Desktop Entry]\nType=Application\nName=%s\nExec=/bin/true\nHidden=true\nX-GNOME-Autostart-enabled=false\n' \
+            "$name" > "$dir/$name.desktop" 2>/dev/null || true
+    done
+}
+
+# How many processes this container is running, by the same criterion the
+# sweeps use. Printed after a launch because it is the number that decides
+# whether Android will let the session live.
+count_guest_processes() {
+    local d n=0
+    for d in /proc/[0-9]*; do
+        [ -r "$d/status" ] || continue
+        if read_field "$d/status" "TracerPid:" 2>/dev/null; then
+            [ "$FIELD" != 0 ] && n=$((n + 1))
+        fi
+    done
+    echo "$n"
+}
+
 sweep_orphans() {
     local d c pid killed=0
     for d in /proc/[0-9]*; do
@@ -160,6 +211,7 @@ sweep() {   # $1 = signal
 }
 
 load_spare_tracer
+trim_autostart
 vncserver -kill ":$DISPLAY_NUM" >/dev/null 2>&1 || true
 sweep TERM
 sleep 2 || true
@@ -807,6 +859,18 @@ attempt() {   # $1 = session type (x11|wayland)
         # degrades badly when it falls back; cairo is the honest choice on a CPU
         # rasteriser and is visibly faster for Files, Text Editor and Settings.
         echo 'export GSK_RENDERER=cairo'
+        # Every one of these exists to stop a process being started.
+        #
+        # Android allows an app 32 processes outside its own management and
+        # SIGKILLs them past that — measured on this device at 45, which is why
+        # sessions were dying with memory to spare. GIO is the single biggest
+        # contributor: asked for a filesystem it starts gvfsd, a FUSE mount and
+        # a volume monitor per technology (UDisks2, MTP, GPhoto2, AFC, Google
+        # accounts, Trash), which is six to eight processes for hardware that
+        # does not exist behind a VNC server.
+        echo 'export GIO_USE_VFS=local'
+        echo 'export GIO_USE_VOLUME_MONITOR=unix'
+        echo 'export GVFS_DISABLE_FUSE=1'
         if [ -n "$session_env" ]; then echo "export $session_env"; fi
         if [ "$stype" = "wayland" ]; then
             echo 'export XDG_SESSION_TYPE=wayland'
@@ -853,6 +917,7 @@ attempt() {   # $1 = session type (x11|wayland)
             report_session
             return 1
         fi
+        echo "[desktop] processes in the container: $(count_guest_processes) (Android kills above 32)"
         report_session
         return 0
     fi
@@ -911,7 +976,7 @@ fi
 # file actually defines — because an edit once removed four of these at once,
 # the file still parsed, CI stayed green, and the phone said
 # "wait_for_session: command not found" halfway through a launch.
-WT_REQUIRED_FUNCTIONS="read_field read_starttime load_spare_tracer ensure_apt_lists ensure_packages ensure_firefox tune_firefox sweep_orphans sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus system_bus_answers wait_for_socket attempt start_audio"
+WT_REQUIRED_FUNCTIONS="read_field read_starttime load_spare_tracer trim_autostart count_guest_processes ensure_apt_lists ensure_packages ensure_firefox tune_firefox sweep_orphans sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus system_bus_answers wait_for_socket attempt start_audio"
 for _f in $WT_REQUIRED_FUNCTIONS; do
     if ! declare -F "$_f" >/dev/null; then
         echo "[desktop] INTERNAL ERROR: this script is missing $_f. Not launching."

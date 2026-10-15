@@ -155,13 +155,19 @@ class LinuxEnvironment(context: Context) {
 
     private val memoryLog: File get() = File(home, "tmp/wt-memory.log")
 
-    /** One reading, appended to a short rolling file. Cheap enough to call often. */
+    /**
+     * One reading, appended to a short rolling file. Cheap enough to call often.
+     *
+     * Stored as raw bytes rather than "1,9 GB": the app has to be able to say
+     * whether memory was ever short, and a formatted, locale-punctuated string
+     * cannot be compared with anything.
+     */
     fun recordMemorySample() {
         runCatching {
             val am = appContext.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             val info = ActivityManager.MemoryInfo()
             am.getMemoryInfo(info)
-            val line = formatBytes(info.availMem) + if (info.lowMemory) "|low" else ""
+            val line = info.availMem.toString() + if (info.lowMemory) "|low" else ""
             memoryLog.parentFile?.mkdirs()
             // Rewritten rather than appended: it is a ring of a few dozen
             // readings, and it must never become another file that grows.
@@ -171,18 +177,52 @@ class LinuxEnvironment(context: Context) {
         }
     }
 
-    /** The last few readings, newest last, ready to show. */
-    fun memoryTrace(samples: Int = 6): List<String> =
+    /** Every reading still on file, as (free bytes, Android called it low). */
+    private fun memorySamples(): List<Pair<Long, Boolean>> =
         runCatching {
-            memoryLog.readLines().takeLast(samples).map { s ->
-                val low = s.endsWith("|low")
-                appContext.getString(
-                    R.string.mem_sample,
-                    s.removeSuffix("|low"),
-                    if (low) appContext.getString(R.string.mem_low) else "",
-                )
+            memoryLog.readLines().mapNotNull { line ->
+                val low = line.endsWith("|low")
+                line.removeSuffix("|low").trim().toLongOrNull()?.let { it to low }
             }
         }.getOrDefault(emptyList())
+
+    /** The last few readings, newest last, ready to show. */
+    fun memoryTrace(samples: Int = 6): List<String> =
+        memorySamples().takeLast(samples).map { (bytes, low) ->
+            appContext.getString(
+                R.string.mem_sample,
+                formatBytes(bytes),
+                if (low) appContext.getString(R.string.mem_low) else "",
+            )
+        }
+
+    /**
+     * The least free memory seen while the session ran, or null if nothing was
+     * recorded. This is what turns the readings from a list into an answer: if
+     * the floor is high, the session was not killed for memory, and three
+     * sessions' worth of that assumption were wrong.
+     */
+    fun memoryFloor(): Long? = memorySamples().minOfOrNull { it.first }
+
+    /** Did Android ever flag the device as low on memory during the session? */
+    fun memoryEverLow(): Boolean = memorySamples().any { it.second }
+
+    /**
+     * How the container's own process ended, as the kernel reported it to us.
+     * Null when nothing was recorded — a session that never started, or an app
+     * that was itself killed before it could write the number down.
+     */
+    fun sessionExitStatus(): Int? = runCatching {
+        File(home, "tmp/wt-session.exit").readText().trim().toIntOrNull()
+    }.getOrNull()
+
+    private fun recordSessionExit(code: Int) {
+        runCatching {
+            val f = File(home, "tmp/wt-session.exit")
+            f.parentFile?.mkdirs()
+            f.writeText("$code\n")
+        }
+    }
 
     /**
      * What the desktop session itself printed. start-desktop.sh redirects the
@@ -375,6 +415,7 @@ class LinuxEnvironment(context: Context) {
      */
     fun startDesktop(geometry: String, onLog: (String) -> Unit): String? {
         stopDesktop()
+        runCatching { File(home, "tmp/wt-session.exit").delete() }   // last session's verdict
         val pb = ProcessBuilder(containerCommand("start-desktop.sh")).redirectErrorStream(true)
         configureEnv(pb, desktopEnvVars() + mapOf("WT_GEOMETRY" to geometry))
         val process = pb.start()
@@ -416,9 +457,20 @@ class LinuxEnvironment(context: Context) {
         }
 
         if (endpoint != null) {
-            // Keep the session alive; drain its remaining output off-thread.
-            Thread { runCatching { reader.forEachLine(onLog) } }
-                .apply { isDaemon = true; start() }
+            // Keep the session alive; drain its remaining output off-thread —
+            // and, when it finally ends, record HOW.
+            //
+            // This handle is proot itself: run-in-ubuntu.sh execs it, so the
+            // process the app holds is the container's tracer, and its exit
+            // status is the one number that separates the remaining
+            // explanations. 137 is SIGKILL from outside; 159 is SIGSYS, the
+            // sandbox refusing a system call proot made; 139 or 134 is proot
+            // crashing on its own. Guessing between those has cost three
+            // sessions already.
+            Thread {
+                runCatching { reader.forEachLine(onLog) }
+                recordSessionExit(runCatching { process.waitFor() }.getOrDefault(-1))
+            }.apply { isDaemon = true; name = "session-reaper"; start() }
         } else {
             stopDesktop()
         }

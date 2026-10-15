@@ -211,6 +211,21 @@ class VncActivity : AppCompatActivity() {
             val trace = runCatching { env.memoryTrace() }.getOrDefault(emptyList())
             var evidence = if (trace.isEmpty()) ""
                            else "\n\n" + getString(R.string.vnc_gone_memory, trace.joinToString("  →  "))
+            // Draw the conclusion here rather than leaving a list of numbers
+            // for the user to interpret. The first time these were shown they
+            // read 1.9-2.2 GB free throughout, which settles the question that
+            // three sessions were argued over: it was not memory.
+            val floor = runCatching { env.memoryFloor() }.getOrNull()
+            if (floor != null && !env.memoryEverLow() && floor > MEMORY_COMFORTABLE) {
+                evidence += "\n\n" + getString(
+                    R.string.vnc_gone_memory_ruled_out, LinuxEnvironment.formatBytes(floor)
+                )
+            }
+            // And the number that separates what is left: how the container's
+            // own process ended.
+            runCatching { env.sessionExitStatus() }.getOrNull()?.let { code ->
+                evidence += "\n\n" + getString(R.string.vnc_gone_exit, describeExit(code))
+            }
             // One signature in the log is decisive, and it is not "proot is
             // gone" — proot exits whenever the session ends, so finding it gone
             // afterwards proves nothing either way. What cannot happen on a
@@ -239,6 +254,27 @@ class VncActivity : AppCompatActivity() {
                     .show()
             }
         }.apply { isDaemon = true; start() }
+    }
+
+    /**
+     * What an exit status means, in words.
+     *
+     * Java reports a child killed by a signal as 128 + the signal number, and
+     * these particular signals each point somewhere different: SIGKILL comes
+     * from outside the process (Android reclaiming, or a power manager),
+     * SIGSYS is the sandbox refusing a system call the process made, and
+     * SIGSEGV or SIGABRT mean proot failed on its own account.
+     */
+    private fun describeExit(code: Int): String = when {
+        code == 0 -> getString(R.string.exit_clean)
+        code > 128 -> when (val sig = code - 128) {
+            9 -> getString(R.string.exit_sigkill, sig)
+            31 -> getString(R.string.exit_sigsys, sig)
+            11, 6, 7, 4 -> getString(R.string.exit_crash, sig)
+            15 -> getString(R.string.exit_sigterm, sig)
+            else -> getString(R.string.exit_signal, sig)
+        }
+        else -> getString(R.string.exit_status, code)
     }
 
     /** Start a fresh session and connect to it, without leaving the viewer. */
@@ -271,6 +307,14 @@ class VncActivity : AppCompatActivity() {
     companion object {
         private const val EXTRA_HOST = "host"
         private const val EXTRA_PORT = "port"
+
+        /**
+         * Above this much free memory, a session that ended was not short of
+         * it. Deliberately generous: the point is to rule memory out, and a
+         * device with half a gigabyte spare did not kill a 20 MB process for
+         * space.
+         */
+        private const val MEMORY_COMFORTABLE = 512L * 1024 * 1024
 
         /** Give up after this many, rather than retrying a dead socket forever. */
         private const val MAX_RECONNECTS = 8

@@ -174,6 +174,43 @@ mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
 rm -f /root/.ICEauthority /root/.Xauthority 2>/dev/null || true
 rm -f "$SESSION_LOG" 2>/dev/null || true
 
+# Stop the container claiming to be running systemd, because it is not.
+#
+# This is not tidiness; it is the difference between GNOME starting and GNOME
+# showing its "Oh no" screen. gnome-shell decides which login manager to use
+# with one line (js/misc/loginManager.js in 46.2):
+#
+#     function haveSystemd() {
+#         return GLib.access('/run/systemd/seats', 0) >= 0;
+#     }
+#
+# If that directory exists it builds a LoginManagerSystemd, whose constructor
+# makes a synchronous Gio.DBusProxy for org.freedesktop.login1 — and a proxy
+# with default flags AUTO-STARTS the service. Our system bus can see the
+# standard service directories, so it dutifully tries to activate
+# systemd-logind, which exits 1 because there is no systemd here. The exception
+# comes back out of background.js's constructor during _initializeUI, and the
+# shell dies before it has drawn anything.
+#
+# The directory gets there by itself: logind, activated once and dying, creates
+# /run/systemd/seats on its way up. And /run in a proot rootfs is an ordinary
+# directory on disk, not a tmpfs — so one failed activation, ever, poisons every
+# launch from then on. That is exactly the shape of this bug: GNOME worked, a
+# session was run, and it never worked again.
+#
+# /run/systemd/system is the same lie told to everything else: sd_booted() is
+# precisely access("/run/systemd/system"), and every systemd-aware program in
+# the container believes it on sight.
+#
+# /run/systemd/resolve is deliberately left alone — Ubuntu's /etc/resolv.conf
+# is a symlink into it, and removing it would take DNS down with it.
+for _fake in /run/systemd/seats /run/systemd/system; do
+    if [ -e "$_fake" ]; then
+        rm -rf "$_fake" 2>/dev/null || true
+        echo "[desktop] removed $_fake — there is no systemd here, and software that believes there is fails badly."
+    fi
+done
+
 # --- decide what to start ----------------------------------------------------
 #
 # Honour the app's choice only if it is actually present in THIS rootfs. The
@@ -593,6 +630,14 @@ report_session() {
 #
 # Note what is NOT needed: logind, accountsservice, polkit. The shell copes with
 # those names having no owner. It cannot cope with there being no bus to ask.
+#
+# One correction to that, learned the hard way. "No owner" is survivable; a
+# failed ACTIVATION is not. Giving the container a system bus that can see the
+# standard service directories means a request for org.freedesktop.login1 is no
+# longer answered with "no owner" — D-Bus tries to start systemd-logind, which
+# exits 1, and that error is thrown rather than returned. The shell only asks at
+# all when /run/systemd/seats exists, which is why that directory is removed
+# before every launch (see the top of this file).
 start_system_bus() {
     mkdir -p /run/dbus 2>/dev/null || true
 
@@ -808,6 +853,13 @@ attempt() {   # $1 = session type (x11|wayland)
         echo "[desktop] GNOME came up and then failed (its \"Oh no\" screen)."
     else
         echo "[desktop] the session did not stay running."
+    fi
+    # One failure has a known cause and a known fix, and saying so beats making
+    # the next reader work it out from a GJS stack trace again.
+    if [ -r "$SESSION_LOG" ] && grep -q "StartServiceByName for org.freedesktop.login1" "$SESSION_LOG" 2>/dev/null; then
+        echo "[desktop] CAUSE: the shell took its systemd path and tried to start logind, which cannot run here."
+        echo "[desktop] That only happens when /run/systemd/seats exists. This launch removes it; if the message"
+        echo "[desktop] is back, something inside the session is recreating it mid-session."
     fi
     report_session
     return 1

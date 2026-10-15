@@ -231,6 +231,45 @@ ensure_firefox() {
     fi
 }
 
+# Firefox arrives configured for a desktop: one content process per few tabs,
+# each one hundreds of megabytes. On this device that is what gets the whole
+# session killed — the X server has twice now vanished without a word, which is
+# what being reclaimed for memory looks like, once with YouTube loading.
+#
+# These are defaults, not locks: they are what the browser starts with, and
+# anything here can still be changed in about:config.
+tune_firefox() {
+    have firefox || return 0
+    local dir
+    dir=$(dirname "$(readlink -f "$(command -v firefox)")") 2>/dev/null || dir=""
+    mkdir -p /etc/firefox/policies
+    [ -n "$dir" ] && mkdir -p "$dir/distribution" 2>/dev/null
+
+    cat > /etc/firefox/policies/policies.json <<'FFEOF'
+{
+  "policies": {
+    "DisableTelemetry": true,
+    "DisableFirefoxStudies": true,
+    "Preferences": {
+      "dom.ipc.processCount": { "Value": 1, "Status": "default" },
+      "browser.tabs.remote.autostart": { "Value": true, "Status": "default" },
+      "gfx.webrender.software": { "Value": true, "Status": "default" },
+      "media.hardware-video-decoding.enabled": { "Value": false, "Status": "default" },
+      "browser.sessionstore.interval": { "Value": 60000, "Status": "default" },
+      "browser.cache.memory.capacity": { "Value": 32768, "Status": "default" },
+      "extensions.pocket.enabled": { "Value": false, "Status": "default" }
+    }
+  }
+}
+FFEOF
+    # Mozilla's own build reads the copy next to the binary; the packaged one
+    # reads /etc. Writing both costs nothing and covers either.
+    if [ -n "$dir" ] && [ -d "$dir/distribution" ]; then
+        cp /etc/firefox/policies/policies.json "$dir/distribution/policies.json" 2>/dev/null || true
+    fi
+    echo "[desktop] Firefox tuned for this device (one content process)."
+}
+
 #   x11-utils          xwininfo, which is how we tell a drawn desktop from a
 #                      black screen; without it a failure is undiagnosable.
 #   libjxl-gdk-pixbuf  GNOME 46 ships its wallpapers as JPEG XL. With no loader
@@ -262,6 +301,7 @@ if [ "$DE" = "gnome" ]; then
     # succeed even if it could — the phone owns the network, not the container.
     ensure_packages upower accountsservice
     ensure_firefox
+    tune_firefox
 fi
 
 echo "[desktop] desktop: $DE"
@@ -299,6 +339,9 @@ idle-delay=uint32 0
 
 [org/gnome/mutter]
 check-alive-timeout=uint32 60000
+
+[org/gnome/desktop/a11y]
+always-show-universal-access-status=false
 
 [org/freedesktop/tracker3/miner/files]
 index-recursive-directories=@as []
@@ -350,6 +393,10 @@ EOF
         echo
         echo "[org/gnome/desktop/interface]"
         echo "enable-animations=false"
+        # A desktop-sized session on a phone-sized panel: readable text matters
+        # more here than fitting more of it on screen. A default, so Settings
+        # can still change it.
+        echo "text-scaling-factor=1.25"
         [ -d /usr/share/themes/Yaru ] && echo "gtk-theme='Yaru'"
         [ -d /usr/share/icons/Yaru ] && echo "icon-theme='Yaru'"
     } >> /etc/dconf/db/local.d/00-whatsthat
@@ -755,7 +802,7 @@ fi
 # file actually defines — because an edit once removed four of these at once,
 # the file still parsed, CI stayed green, and the phone said
 # "wait_for_session: command not found" halfway through a launch.
-WT_REQUIRED_FUNCTIONS="read_field ensure_apt_lists ensure_packages ensure_firefox sweep_orphans sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus system_bus_answers wait_for_socket attempt start_audio"
+WT_REQUIRED_FUNCTIONS="read_field ensure_apt_lists ensure_packages ensure_firefox tune_firefox sweep_orphans sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus system_bus_answers wait_for_socket attempt start_audio"
 for _f in $WT_REQUIRED_FUNCTIONS; do
     if ! declare -F "$_f" >/dev/null; then
         echo "[desktop] INTERNAL ERROR: this script is missing $_f. Not launching."

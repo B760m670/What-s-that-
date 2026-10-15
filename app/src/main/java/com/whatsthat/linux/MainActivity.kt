@@ -212,7 +212,32 @@ class MainActivity : AppCompatActivity() {
      * Desktop resolution. A phone panel is not 1280x720, and the old fixed size
      * meant everything was scaled to fit whether or not that suited the screen.
      */
-    private val resolutionOptions = listOf("1280x720", "1600x900", "1920x1080", "1024x600")
+    private val resolutionOptions: List<String>
+        get() = listOf(matchedGeometry()) + listOf("1280x720", "1600x900", "1920x1080", "1024x600")
+            .filterNot { it == matchedGeometry() }
+
+    /**
+     * A session shaped like this phone, rather than like a monitor.
+     *
+     * Two things are being balanced. The aspect ratio should match the panel,
+     * or the desktop sits in letterbox bars for the whole session. And the
+     * pixel count must not: a 20:9 phone at its native 2400x1080 is nearly
+     * three times the pixels of 1280x720, which is three times the framebuffer,
+     * the compositing and the bytes over the wire — on a device that has
+     * already killed this session twice for memory.
+     *
+     * So: the panel's proportions, held to about a megapixel, rounded to
+     * multiples of 8 because X servers and video code prefer it.
+     */
+    private fun matchedGeometry(): String {
+        val m = resources.displayMetrics
+        val long = maxOf(m.widthPixels, m.heightPixels).toDouble()
+        val short = minOf(m.widthPixels, m.heightPixels).toDouble()
+        if (long <= 0 || short <= 0) return "1280x720"
+        val scale = kotlin.math.sqrt(1_000_000.0 / (long * short))
+        fun round8(v: Double) = (v.toInt() / 8 * 8).coerceIn(640, 2560)
+        return "${round8(long * scale)}x${round8(short * scale)}"
+    }
 
     private var resolution: String
         get() = getSharedPreferences("wt", MODE_PRIVATE).getString("geometry", "1280x720") ?: "1280x720"
@@ -244,13 +269,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun chooseResolution() {
-        val current = resolutionOptions.indexOf(resolution).coerceAtLeast(0)
+        val options = resolutionOptions
+        val labels = options.mapIndexed { i, g ->
+            if (i == 0) getString(R.string.resolution_matched, g) else g
+        }
+        val current = options.indexOf(resolution).coerceAtLeast(0)
         AlertDialog.Builder(this)
             .setTitle(R.string.resolution_title)
-            .setSingleChoiceItems(resolutionOptions.toTypedArray(), current) { dialog, which ->
-                resolution = resolutionOptions[which]
+            .setSingleChoiceItems(labels.toTypedArray(), current) { dialog, which ->
+                resolution = options[which]
                 dialog.dismiss()
-                appendLog("Desktop resolution set to ${resolutionOptions[which]} (applies on next launch).")
+                appendLog("Desktop resolution set to ${options[which]} (applies on next launch).")
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()

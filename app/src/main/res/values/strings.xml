@@ -77,4 +77,5 @@
     <string name="vnc_relaunch_failed">Could not start it again. Go back and look at the log.</string>
     <string name="vnc_gone_crashed">The X server crashed — its own error is in the log below.</string>
     <string name="vnc_gone_killed">The X server left no error behind, so it did not crash: something killed it. On a phone that is almost always the system reclaiming memory, and it happens under heavy work — a package upgrade, or a video playing.</string>
+    <string name="resolution_matched">%1$s — shaped like this screen</string>
 </resources>

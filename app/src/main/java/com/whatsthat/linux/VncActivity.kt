@@ -197,8 +197,17 @@ class VncActivity : AppCompatActivity() {
                 crashed -> getString(R.string.vnc_gone_crashed)
                 else -> getString(R.string.vnc_gone_killed)
             }
-            val detail = if (tail.isEmpty()) verdict
-                         else verdict + "\n\n" + tail.joinToString("\n")
+            // "Something killed it" is a hypothesis, and until now nothing here
+            // tested it. The service samples free memory while a session is up,
+            // so the last readings before the silence either support it or rule
+            // it out — and ruling it out matters just as much, because then the
+            // cause is something else entirely and memory has been a red
+            // herring for three sessions running.
+            val trace = runCatching { env.memoryTrace() }.getOrDefault(emptyList())
+            val evidence = if (crashed || trace.isEmpty()) ""
+                           else "\n\n" + getString(R.string.vnc_gone_memory, trace.joinToString("  →  "))
+            val detail = if (tail.isEmpty()) verdict + evidence
+                         else verdict + evidence + "\n\n" + tail.joinToString("\n")
             runOnUiThread {
                 if (closing || isFinishing) return@runOnUiThread
                 androidx.appcompat.app.AlertDialog.Builder(this)

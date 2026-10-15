@@ -37,6 +37,8 @@ class LinuxSessionService : Service() {
     /** Set when a desktop session is up, so closing the relay does not kill it. */
     @Volatile private var desktopWanted = false
 
+    @Volatile private var sampling = false
+
     private val env by lazy { LinuxEnvironment(this) }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -55,6 +57,7 @@ class LinuxSessionService : Service() {
         }
 
         if (env.serviceEnabled) startSupervising() else stopSupervising(alsoKill = false)
+        startSampling()
 
         // Nothing left to keep alive: let the notification go rather than
         // leaving a permanent entry in the shade for a container doing nothing.
@@ -68,6 +71,33 @@ class LinuxSessionService : Service() {
         // START_STICKY matters here: if Android reclaims the app, this is what
         // brings the relay back without anybody opening the app again.
         return START_STICKY
+    }
+
+    // --- evidence ------------------------------------------------------------
+
+    /**
+     * Record free memory while anything of ours is running.
+     *
+     * Every silent death so far has been explained by "the system reclaimed the
+     * memory", and that was an inference from the absence of a message, never a
+     * measurement. This is the measurement. It lives in the service rather than
+     * the viewer because it has to be running whenever a session is — including
+     * while the user is in the console, which is where two of those deaths
+     * happened, and the viewer is not on screen.
+     */
+    private fun startSampling() {
+        if (sampling) return
+        sampling = true
+        Thread({
+            while (sampling) {
+                env.recordMemorySample()
+                var waited = 0
+                while (sampling && waited < SAMPLE_INTERVAL_MS) {
+                    try { Thread.sleep(1_000) } catch (_: InterruptedException) { sampling = false }
+                    waited += 1_000
+                }
+            }
+        }, "wt-memory").apply { isDaemon = true; start() }
     }
 
     // --- supervision ---------------------------------------------------------
@@ -229,6 +259,7 @@ class LinuxSessionService : Service() {
     }
 
     override fun onDestroy() {
+        sampling = false
         // Not alsoKill: this service going away is not the user saying stop.
         // The relay runs in the container, reparented to init if need be, and
         // the next start of this service adopts it again.
@@ -263,6 +294,9 @@ class LinuxSessionService : Service() {
         private const val CHANNEL_ID = "linux_session"
         private const val NOTIF_ID = 42
         private const val MAX_LOG_BYTES = 256L * 1024
+
+        /** Often enough to catch a collapse, rare enough to cost nothing. */
+        private const val SAMPLE_INTERVAL_MS = 20_000
 
         const val ACTION_BOOT = "wt.boot"
         const val ACTION_SERVICE_START = "wt.service.start"

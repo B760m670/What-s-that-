@@ -1,5 +1,6 @@
 package com.whatsthat.linux
 
+import android.app.ActivityManager
 import android.content.Context
 import android.os.Build
 import java.io.File
@@ -133,8 +134,55 @@ class LinuxEnvironment(context: Context) {
         val dir = File(distroDir(activeDistro), "root/.vnc")
         val log = dir.listFiles { f -> f.name.endsWith(".log") }
             ?.maxByOrNull { it.lastModified() } ?: return emptyList()
-        return runCatching { log.readLines().takeLast(maxLines) }.getOrDefault(emptyList())
+        return runCatching {
+            // The tail of this file is not the end of the story unless the noise
+            // comes out first. xkbcomp cannot resolve a few hundred XF86 keysyms
+            // against TigerVNC's keymap and says so once per keysym, which is
+            // more lines than the tail is long — so "the last 40 lines" was 40
+            // warnings about sonar and autopilot keys, and the server's actual
+            // last words were never shown. Filter, then take the tail.
+            log.readLines().takeLast(2_000).filterNot(::isLogNoise).takeLast(maxLines)
+        }.getOrDefault(emptyList())
     }
+
+    // --- what the device had left ---------------------------------------------
+    //
+    // Three sessions have now ended with no message at all, and "the system
+    // reclaimed the memory" has been the explanation every time — asserted,
+    // never measured. These record what was actually free while the session
+    // ran, so the next silence is either confirmed or refuted instead of
+    // explained again.
+
+    private val memoryLog: File get() = File(home, "tmp/wt-memory.log")
+
+    /** One reading, appended to a short rolling file. Cheap enough to call often. */
+    fun recordMemorySample() {
+        runCatching {
+            val am = appContext.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val info = ActivityManager.MemoryInfo()
+            am.getMemoryInfo(info)
+            val line = formatBytes(info.availMem) + if (info.lowMemory) "|low" else ""
+            memoryLog.parentFile?.mkdirs()
+            // Rewritten rather than appended: it is a ring of a few dozen
+            // readings, and it must never become another file that grows.
+            val kept = (runCatching { memoryLog.readLines() }.getOrDefault(emptyList()) + line)
+                .takeLast(60)
+            memoryLog.writeText(kept.joinToString("\n", postfix = "\n"))
+        }
+    }
+
+    /** The last few readings, newest last, ready to show. */
+    fun memoryTrace(samples: Int = 6): List<String> =
+        runCatching {
+            memoryLog.readLines().takeLast(samples).map { s ->
+                val low = s.endsWith("|low")
+                appContext.getString(
+                    R.string.mem_sample,
+                    s.removeSuffix("|low"),
+                    if (low) appContext.getString(R.string.mem_low) else "",
+                )
+            }
+        }.getOrDefault(emptyList())
 
     /**
      * What the desktop session itself printed. start-desktop.sh redirects the
@@ -146,8 +194,21 @@ class LinuxEnvironment(context: Context) {
     fun sessionLog(maxLines: Int = 200): List<String> {
         val f = File(home, "tmp/wt-session.log")
         if (!f.exists()) return emptyList()
-        return runCatching { f.readLines().takeLast(maxLines) }.getOrDefault(emptyList())
+        return runCatching {
+            f.readLines().takeLast(2_000).filterNot(::isLogNoise).takeLast(maxLines)
+        }.getOrDefault(emptyList())
     }
+
+    /**
+     * Lines that are always present and never mean anything.
+     *
+     * Every one of these was shipped by the distro, appears on a perfectly
+     * healthy session, and cannot be fixed from here — the keysyms do not exist
+     * in TigerVNC's keymap, VNC has no DPMS, and mutter's handler notice is
+     * routine. They are filtered out of what the user is shown, not out of the
+     * file: the log on disk stays complete for anyone who wants it.
+     */
+    private fun isLogNoise(line: String): Boolean = NOISE.any { line.contains(it) }
     /**
      * Rootfs directories on disk that no longer belong to any offered distro.
      *
@@ -614,6 +675,17 @@ class LinuxEnvironment(context: Context) {
          * is doing this on a phone.
          */
         private const val SILENCE_LIMIT_MS = 300_000L
+
+        /** Harmless lines that drown the useful ones; see [isLogNoise]. */
+        private val NOISE = listOf(
+            "Could not resolve keysym",
+            "Errors from xkbcomp are not fatal",
+            "The XKEYBOARD keymap compiler (xkbcomp) reports:",
+            "extension \"DPMS\" missing",
+            "mieq: warning: overriding existing handler",
+            "Impossible to set scaling on crtc",
+            "Scalig CRTC",
+        )
 
         /** `[step] 3/7 Installing the XFCE desktop` — emitted by install-desktop.sh. */
         private val STEP_MARKER = Regex("""^\[step] (\d+)/(\d+) (.*)$""")

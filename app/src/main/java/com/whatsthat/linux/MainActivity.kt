@@ -284,11 +284,7 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun batteryExempt(): Boolean = runCatching {
-        val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
-        android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M ||
-            pm.isIgnoringBatteryOptimizations(packageName)
-    }.getOrDefault(true)
+    private fun batteryExempt(): Boolean = Power.isExempt(this)
 
     /**
      * Doze is the quiet killer of an always-on service: the process stays, the
@@ -306,18 +302,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestBatteryExemption() {
-        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) return
-        // The direct request needs the permission declared and is not offered on
-        // every build of Android; the battery-settings screen is the fallback
-        // that always exists.
-        val direct = Intent(
-            android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-            android.net.Uri.parse("package:$packageName"),
-        )
-        val fallback = Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-        runCatching { startActivity(direct) }
-            .recoverCatching { startActivity(fallback) }
-            .onFailure { appendLog("Could not open the battery settings: ${it.message}") }
+        if (!Power.requestExemption(this)) {
+            appendLog("Could not open the battery settings on this device.")
+        }
     }
 
     /**

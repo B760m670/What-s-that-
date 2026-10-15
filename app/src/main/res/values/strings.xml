@@ -83,6 +83,8 @@
     <string name="mem_sample">%1$s free%2$s</string>
     <string name="mem_low"> (low)</string>
 
+    <string name="remove_message_service">The always-on service runs from inside this system:\n\n%1$s\n\nIts working files go with it. If they include an identity or a key, reinstalling will not bring it back — whatever used it will come back as something new.</string>
+
     <!-- The always-on service (relay mode). -->
     <string name="action_service">Service</string>
     <string name="svc_title">Always-on service</string>

@@ -101,6 +101,27 @@ export XDG_RUNTIME_DIR=/tmp/runtime-root
 mkdir -p "$XDG_RUNTIME_DIR" 2>/dev/null || true
 chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
 
+# Take as many file descriptors as this device will give.
+#
+# A node holding many connections wants far more than the default 1024, and the
+# usual advice is `ulimit -n 65536`. That advice cannot be followed here, and
+# this device has already said so in its own words:
+#
+#   dbus-daemon: Failed to set fd limit to 65536: Operation not permitted
+#
+# The hard limit belongs to Android, and fake root under proot does not raise
+# it — proot fakes uid 0, not CAP_SYS_RESOURCE. So ask for the hard limit
+# instead of a number from a document, and then say what was actually granted,
+# because "I asked for 65536" and "I have 65536" are different facts and only
+# the second one matters to a process running out of descriptors.
+_hard=$(ulimit -Hn 2>/dev/null || echo "")
+case "$_hard" in
+    unlimited) ulimit -n 65536 2>/dev/null || true ;;
+    ''|*[!0-9]*) : ;;
+    *) ulimit -n "$_hard" 2>/dev/null || true ;;
+esac
+echo "[service] file descriptors: $(ulimit -n) soft, ${_hard:-?} hard."
+
 # The command's output goes to a file, never to the app's pipe.
 #
 # That is not a convenience. If the app's process is killed — swept from

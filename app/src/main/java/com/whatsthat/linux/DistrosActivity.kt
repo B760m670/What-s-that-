@@ -82,7 +82,7 @@ class DistrosActivity : AppCompatActivity() {
             val size = withContext(Dispatchers.IO) { env.diskUsageOf(dir) }
             AlertDialog.Builder(this@DistrosActivity)
                 .setTitle(getString(R.string.remove_title, dir.name))
-                .setMessage(getString(R.string.remove_message, LinuxEnvironment.formatBytes(size)))
+                .setMessage(removalWarning(size))
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton(R.string.distro_remove) { _, _ ->
                     lifecycleScope.launch {
@@ -146,6 +146,23 @@ class DistrosActivity : AppCompatActivity() {
     }
 
     /**
+     * What the user is about to lose, said in full.
+     *
+     * The size is the obvious part. The part worth adding is the always-on
+     * service, when one is configured: its working files live inside this
+     * system, and for something like a peer-to-peer node they include an
+     * identity that cannot be regenerated — delete it and the node comes back
+     * as a stranger with a new name. That is not recoverable by reinstalling,
+     * which is what the ordinary warning implies, so it is said separately.
+     */
+    private fun removalWarning(size: Long): String {
+        val base = getString(R.string.remove_message, LinuxEnvironment.formatBytes(size))
+        val svc = env.serviceCommand
+        return if (svc.isBlank()) base
+               else base + "\n\n" + getString(R.string.remove_message_service, svc)
+    }
+
+    /**
      * Removing a distro deletes gigabytes and everything installed inside it.
      * It used to happen on a single tap with no warning and no way back.
      */
@@ -154,7 +171,7 @@ class DistrosActivity : AppCompatActivity() {
             val size = withContext(Dispatchers.IO) { env.diskUsage(d) }
             AlertDialog.Builder(this@DistrosActivity)
                 .setTitle(getString(R.string.remove_title, d.name))
-                .setMessage(getString(R.string.remove_message, LinuxEnvironment.formatBytes(size)))
+                .setMessage(removalWarning(size))
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton(R.string.distro_remove) { _, _ ->
                     lifecycleScope.launch {

@@ -210,9 +210,6 @@ class LinuxEnvironment(context: Context) {
             }
         }.getOrDefault(emptyList())
 
-    /** The most processes the container was ever seen running. */
-    fun guestProcessPeak(): Int = memorySamples().maxOfOrNull { it.second } ?: 0
-
     /** The last few readings, newest last, ready to show. */
     fun memoryTrace(samples: Int = 6): List<String> =
         memorySamples().takeLast(samples).map { (bytes, _, low) ->
@@ -461,8 +458,26 @@ class LinuxEnvironment(context: Context) {
         // measured. readLine() blocks, so the watchdog runs beside it and ends
         // the process, which is what makes readLine() return.
         val lastOutput = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis())
+
+        // This guards the LAUNCH, and only the launch. The distinction is the
+        // whole bug it used to be:
+        //
+        // The loop below stops reading at VNC_READY, because that is when the
+        // session is up and the call returns. From then on lastOutput never
+        // moved again — so five minutes after a SUCCESSFUL start, this thread
+        // declared the launch stuck and called destroy() on the container. On
+        // Android that is SIGKILL, not SIGTERM, which is why every session died
+        // with status 137 a few minutes in; why proot vanished under its own
+        // tracees; why their next syscalls failed with ENOSYS; and why the X
+        // server then took SIGSYS on accept() and wrote a crash report for a
+        // crash that was never its fault. Memory, the process cap and the
+        // sandbox were all investigated. It was this.
+        //
+        // A running session is legitimately silent for hours. Nothing may watch
+        // it for silence, so the watchdog ends when the launch does.
+        val launching = java.util.concurrent.atomic.AtomicBoolean(true)
         Thread {
-            while (desktopProcess === process && process.isAlive) {
+            while (launching.get() && process.isAlive) {
                 if (System.currentTimeMillis() - lastOutput.get() > SILENCE_LIMIT_MS) {
                     onLog("[launch] no output for ${SILENCE_LIMIT_MS / 1000}s — giving up.")
                     runCatching { process.destroy() }
@@ -482,6 +497,7 @@ class LinuxEnvironment(context: Context) {
             val ep = line.substringAfter("VNC_READY ", "").trim()
             if (ep.isNotEmpty()) { endpoint = ep; break }
         }
+        launching.set(false)   // the launch is over, one way or the other
 
         if (endpoint != null) {
             // Keep the session alive; drain its remaining output off-thread —
@@ -706,38 +722,6 @@ class LinuxEnvironment(context: Context) {
     fun runningServiceCommand(): String? = runCatching {
         File(home, "tmp/wt-service/command").readText().trim().ifEmpty { null }
     }.getOrNull()
-
-    /**
-     * Run the fixer for Android's process cap inside the container.
-     *
-     * Everything hard happens in fix-process-limit.sh; this supplies what only
-     * the app can know — the ports, the pairing code, and its own package name
-     * so the script can grant it the permission on the way past. Returns true
-     * when the script reports the setting actually changed, not merely that it
-     * tried: the script re-reads it before saying so.
-     */
-    fun fixProcessLimit(
-        pairPort: Int,
-        pairCode: String,
-        connectPort: Int,
-        onLog: (String) -> Unit,
-    ): Boolean {
-        var ok = false
-        execScript(
-            "fix-process-limit.sh", insideContainer = true,
-            extraEnv = mapOf(
-                "WT_ADB_PAIR_PORT" to pairPort.toString(),
-                "WT_ADB_PAIR_CODE" to pairCode,
-                "WT_ADB_CONNECT_PORT" to if (connectPort > 0) connectPort.toString() else "",
-                "WT_APP_PKG" to appContext.packageName,
-            ),
-            onLog = { line ->
-                if (line.contains("[fix] RESULT ok")) ok = true
-                onLog(line)
-            },
-        )
-        return ok
-    }
 
     // --- internals -----------------------------------------------------------
 

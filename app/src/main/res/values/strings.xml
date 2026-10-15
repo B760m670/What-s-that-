@@ -95,28 +95,6 @@
     <string name="exit_signal">killed by signal %1$d.</string>
     <string name="exit_status">it exited with status %1$d.</string>
 
-    <string name="vnc_gone_phantom">A kill from outside with memory to spare points at one thing. Since Android 12 the system limits how many processes an app may run outside its own management — 32 for all apps together — and kills them outright when that is passed. This session was running %1$d. A desktop cannot get under that limit; an always-on service, which is one process, is nowhere near it.\n\nIt can be switched off, and that is the real fix. On the phone: Developer options → \"Disable child process restrictions\". From a computer: adb shell settings put global settings_enable_monitor_phantom_procs false</string>
-
-    <!-- Android\'s cap on background processes (the signal-9 killer). -->
-    <string name="cap_card_title">Sessions are being killed by Android</string>
-    <string name="cap_card_body">This device limits how many processes an app may run — 32, across all apps — and kills them when that is passed. A desktop is more than that on its own, which is why sessions end abruptly even with memory to spare. It can be switched off, and the app can do it for you.</string>
-    <string name="cap_card_action">Fix this</string>
-    <string name="cap_title">Lift the process limit</string>
-    <string name="cap_explain">Android only lets this be changed over its developer connection, so the app has to use it on itself. Nothing leaves the device and no computer is needed.\n\nYou will turn on Wireless debugging, and read the app a six-digit code. Everything else is automatic, and this is needed once.</string>
-    <string name="cap_open_settings">Open developer settings</string>
-    <string name="cap_ready">I\'ve done that</string>
-    <string name="cap_steps">In the settings screen that opened:\n\n1. Turn on Wireless debugging.\n2. Tap \"Pair device with pairing code\".\n3. Leave that dialog open and come back here.</string>
-    <string name="cap_code_title">The six digits</string>
-    <string name="cap_code_message">Type the pairing code the phone is showing. The port is found automatically — leave the dialog on the phone open until this finishes.</string>
-    <string name="cap_code_hint">Six digits</string>
-    <string name="cap_apply">Do it</string>
-    <string name="cap_working">Pairing with this phone…</string>
-    <string name="cap_found_port">Found wireless debugging on port %1$d.</string>
-    <string name="cap_no_port">Could not find the pairing port. Is \"Pair device with pairing code\" still open on the phone?</string>
-    <string name="cap_no_settings">Could not open the settings screen on this device.</string>
-    <string name="cap_done">Done — Android will not kill the container\'s processes for exceeding the limit any more. This holds across restarts.</string>
-    <string name="cap_direct_failed">The setting could not be changed, although the permission is held. Try the pairing route again.</string>
-    <string name="cap_failed">That did not work. The log below has what adb said — the usual cause is the pairing dialog having closed, or a wrong code.</string>
 
     <!-- The always-on service (relay mode). -->
     <string name="action_service">Service</string>

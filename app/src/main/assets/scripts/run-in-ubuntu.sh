@@ -77,8 +77,4 @@ exec "$PROOT" \
         WT_DE="${WT_DE:-xfce}" \
         WT_SESSION_TYPE="${WT_SESSION_TYPE:-x11}" \
         WT_SERVICE_CMD="${WT_SERVICE_CMD:-}" \
-        WT_ADB_PAIR_PORT="${WT_ADB_PAIR_PORT:-}" \
-        WT_ADB_PAIR_CODE="${WT_ADB_PAIR_CODE:-}" \
-        WT_ADB_CONNECT_PORT="${WT_ADB_CONNECT_PORT:-}" \
-        WT_APP_PKG="${WT_APP_PKG:-}" \
         "$@"

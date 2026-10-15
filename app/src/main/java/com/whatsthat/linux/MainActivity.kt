@@ -48,7 +48,6 @@ class MainActivity : AppCompatActivity() {
         binding.desktopButton.setOnClickListener { chooseDesktop() }
         binding.resolutionButton.setOnClickListener { chooseResolution() }
         binding.serviceButton.setOnClickListener { configureService() }
-        binding.limitButton.setOnClickListener { offerProcessLimitFix() }
         binding.runButton.setOnClickListener { runConsoleCommand() }
         binding.cmdInput.setOnEditorActionListener { _, _, _ -> runConsoleCommand(); true }
         binding.consoleHeader.setOnClickListener { toggleConsole() }
@@ -114,12 +113,6 @@ class MainActivity : AppCompatActivity() {
                 addChip(getString(R.string.svc_running), R.color.state_ready)
             }
             if (size > 0) addChip(LinuxEnvironment.formatBytes(size), R.color.state_absent)
-
-            // The cap is the one thing here the user cannot discover for
-            // themselves: it is invisible until it kills something. Shown only
-            // where it is real — null means a device too old to have it.
-            binding.limitCard.visibility =
-                if (ProcessLimit.isRestricted(this@MainActivity) == true) View.VISIBLE else View.GONE
 
             // A live session means the desktop is already up: offer to return to
             // it rather than silently starting a second one.
@@ -221,125 +214,6 @@ class MainActivity : AppCompatActivity() {
     private fun startSessionService() {
         runCatching { LinuxSessionService.send(this, LinuxSessionService.ACTION_DESKTOP_UP) }
             .onFailure { appendLog("(session service not started: ${it.message})") }
-    }
-
-    // --- Android's process cap ------------------------------------------------
-
-    /**
-     * Offer the fix for the thing that has been killing sessions, and do all of
-     * it except the six digits only the user can read.
-     *
-     * The honest alternative was a paragraph of instructions ending in four
-     * terminal commands, which is not something to hand someone who installed
-     * an app. So: the app detects the cap, opens the right settings screen,
-     * finds the ports over mDNS, and runs adb against the phone it is running
-     * on. The user types a pairing code once, ever.
-     */
-    private fun offerProcessLimitFix() {
-        if (ProcessLimit.canWriteDirectly(this)) {
-            // The permission survives; the ordeal does not have to be repeated.
-            val ok = ProcessLimit.disableDirectly(this)
-            appendLog(getString(if (ok) R.string.cap_done else R.string.cap_direct_failed))
-            refreshState()
-            return
-        }
-        AlertDialog.Builder(this)
-            .setTitle(R.string.cap_title)
-            .setMessage(R.string.cap_explain)
-            .setPositiveButton(R.string.cap_open_settings) { _, _ -> openDeveloperOptions() }
-            .setNeutralButton(R.string.cap_ready) { _, _ -> askPairingCode() }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    private fun openDeveloperOptions() {
-        val ok = runCatching {
-            startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
-            true
-        }.recoverCatching {
-            startActivity(Intent(android.provider.Settings.ACTION_SETTINGS)); true
-        }.getOrDefault(false)
-        if (!ok) appendLog(getString(R.string.cap_no_settings))
-        // Coming back is the user's cue to continue, so leave the next step on
-        // screen rather than making them find the button again.
-        AlertDialog.Builder(this)
-            .setTitle(R.string.cap_title)
-            .setMessage(R.string.cap_steps)
-            .setPositiveButton(R.string.cap_ready) { _, _ -> askPairingCode() }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    /**
-     * Ask for the pairing code — and, while the user is reading it, look for
-     * the port over mDNS so they never have to type that too.
-     */
-    private fun askPairingCode() {
-        val input = android.widget.EditText(this).apply {
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            hint = getString(R.string.cap_code_hint)
-        }
-        val wrap = android.widget.FrameLayout(this).apply {
-            val pad = (20 * resources.displayMetrics.density).toInt()
-            setPadding(pad, pad / 2, pad, 0)
-            addView(input)
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(R.string.cap_code_title)
-            .setMessage(R.string.cap_code_message)
-            .setView(wrap)
-            .setPositiveButton(R.string.cap_apply, null)
-            .setNegativeButton(android.R.string.cancel, null)
-            .create()
-
-        // Discovery runs while the dialog is up: the pairing service is only
-        // advertised for as long as that screen is open on the phone.
-        val port = java.util.concurrent.atomic.AtomicInteger(0)
-        lifecycleScope.launch {
-            val found = withContext(Dispatchers.IO) { ProcessLimit.findPairingPort(this@MainActivity) }
-            port.set(found)
-            if (found > 0) appendLog(getString(R.string.cap_found_port, found))
-        }
-
-        dialog.setOnShowListener {
-            dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
-                val code = input.text.toString().trim()
-                if (code.length < 6) {
-                    input.error = getString(R.string.cap_code_hint)
-                    return@setOnClickListener
-                }
-                dialog.dismiss()
-                runProcessLimitFix(code, port.get())
-            }
-        }
-        dialog.show()
-    }
-
-    private fun runProcessLimitFix(code: String, discoveredPort: Int) {
-        setBusy(true, getString(R.string.cap_working))
-        expandConsole()
-        lifecycleScope.launch {
-            val ok = withContext(Dispatchers.IO) {
-                var pair = discoveredPort
-                if (pair <= 0) pair = ProcessLimit.findPairingPort(this@MainActivity, 6_000L)
-                val connect = ProcessLimit.findConnectPort(this@MainActivity, 6_000L)
-                if (pair <= 0) {
-                    appendLog(getString(R.string.cap_no_port))
-                    false
-                } else {
-                    env.fixProcessLimit(pair, code, connect, ::appendLog)
-                }
-            }
-            setBusy(false)
-            // Trust the system's own answer over the script's, where we can.
-            val settled = ProcessLimit.isRestricted(this@MainActivity) == false
-            AlertDialog.Builder(this@MainActivity)
-                .setTitle(R.string.cap_title)
-                .setMessage(getString(if (ok || settled) R.string.cap_done else R.string.cap_failed))
-                .setPositiveButton(android.R.string.ok, null)
-                .show()
-            refreshState()
-        }
     }
 
     // --- the always-on service ------------------------------------------------

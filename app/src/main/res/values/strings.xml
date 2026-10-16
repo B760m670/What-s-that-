@@ -98,6 +98,9 @@
 
     <string name="vnc_gone_processes">Processes running inside the system: %1$d at the last reading, %2$d at the most. Android allows an app 32 processes outside its own management, counted across all apps, and kills them when that is passed — so a number near or above 32 is the explanation, and a number well below it means the cause is something else again.</string>
 
+    <string name="vnc_gone_cpu">Busiest reading: %1$d%% of one processor core. Android\'s limit on unmanaged processes covers processor use as well as their number, under the same switch — so a session that was working hard can be killed while well under the count.</string>
+    <string name="vnc_gone_device">Device: %1$s, Android %2$s (API %3$d).</string>
+
     <!-- The always-on service (relay mode). -->
     <string name="action_service">Service</string>
     <string name="svc_title">Always-on service</string>

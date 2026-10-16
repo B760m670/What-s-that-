@@ -170,7 +170,9 @@ class LinuxEnvironment(context: Context) {
             // Free bytes, how many processes the container is running, and
             // whether Android called the device low — the three numbers that
             // between them name every way a session has died so far.
-            val line = "${info.availMem},${guestProcessCount()}" + if (info.lowMemory) "|low" else ""
+            val (procs, ticks) = guestStats()
+            val line = "${info.availMem},$procs,$ticks,${System.currentTimeMillis()}" +
+                if (info.lowMemory) "|low" else ""
             memoryLog.parentFile?.mkdirs()
             // Rewritten rather than appended: it is a ring of a few dozen
             // readings, and it must never become another file that grows.
@@ -188,35 +190,98 @@ class LinuxEnvironment(context: Context) {
      * matters because Android caps how many unmanaged child processes an app
      * may have, and kills them when it is exceeded.
      */
-    fun guestProcessCount(): Int = runCatching {
-        (File("/proc").listFiles() ?: return 0).count { d ->
-            d.isDirectory && d.name.all(Char::isDigit) && runCatching {
+    fun guestProcessCount(): Int = guestStats().first
+
+    /**
+     * The container, counted and timed in one pass: how many processes it is
+     * running, and how much CPU they have used in total.
+     *
+     * The CPU figure is here because the count turned out not to be the whole
+     * story. Android 12 introduced two rules for an app's unmanaged processes,
+     * not one — a cap on how many, and a limit on how much processor they use —
+     * and the same switch governs both. Having measured the first and found a
+     * session dying at 26 of an allowed 32, the second is what is left to
+     * measure.
+     *
+     * Ticks are the kernel's own units (utime + stime, USER_HZ = 100), summed
+     * across every tracee. A rate only means something between two samples, so
+     * this records the total and the arithmetic happens later.
+     */
+    private fun guestStats(): Pair<Int, Long> = runCatching {
+        var count = 0
+        var ticks = 0L
+        for (d in File("/proc").listFiles() ?: emptyArray()) {
+            if (!d.isDirectory || !d.name.all(Char::isDigit)) continue
+            val traced = runCatching {
                 File(d, "status").bufferedReader().useLines { lines ->
                     lines.firstOrNull { it.startsWith("TracerPid:") }
                         ?.substringAfter(':')?.trim()?.toIntOrNull()?.let { it != 0 } ?: false
                 }
             }.getOrDefault(false)
+            if (!traced) continue
+            count++
+            // Fields 14 and 15 of /proc/<pid>/stat, counting from the state at
+            // field 3 — so positions 12 and 13 of what follows the comm.
+            runCatching {
+                val f = File(d, "stat").readText().substringAfter(") ").trim().split(" ")
+                ticks += (f.getOrNull(11)?.toLongOrNull() ?: 0L) + (f.getOrNull(12)?.toLongOrNull() ?: 0L)
+            }
         }
-    }.getOrDefault(0)
+        count to ticks
+    }.getOrDefault(0 to 0L)
 
-    /** Every reading still on file: free bytes, guest processes, low flag. */
-    private fun memorySamples(): List<Triple<Long, Int, Boolean>> =
+    /** One recorded reading. */
+    private data class Sample(
+        val freeBytes: Long,
+        val processes: Int,
+        val cpuTicks: Long,
+        val atMs: Long,
+        val low: Boolean,
+    )
+
+    private fun memorySamples(): List<Sample> =
         runCatching {
             memoryLog.readLines().mapNotNull { line ->
                 val low = line.endsWith("|low")
-                val parts = line.removeSuffix("|low").trim().split(',')
-                val bytes = parts.getOrNull(0)?.toLongOrNull() ?: return@mapNotNull null
-                Triple(bytes, parts.getOrNull(1)?.toIntOrNull() ?: 0, low)
+                val p = line.removeSuffix("|low").trim().split(',')
+                val bytes = p.getOrNull(0)?.toLongOrNull() ?: return@mapNotNull null
+                Sample(
+                    bytes,
+                    p.getOrNull(1)?.toIntOrNull() ?: 0,
+                    p.getOrNull(2)?.toLongOrNull() ?: 0L,
+                    p.getOrNull(3)?.toLongOrNull() ?: 0L,
+                    low,
+                )
             }
         }.getOrDefault(emptyList())
 
+    /**
+     * The container's busiest minute, as a percentage of one core.
+     *
+     * Computed between consecutive samples, because a total tells nothing on
+     * its own. Returns null when there is not enough to compare.
+     */
+    fun guestCpuPeakPercent(): Int? {
+        val s = memorySamples().filter { it.atMs > 0 }
+        if (s.size < 2) return null
+        var peak = 0
+        for (i in 1 until s.size) {
+            val ms = s[i].atMs - s[i - 1].atMs
+            val ticks = s[i].cpuTicks - s[i - 1].cpuTicks
+            if (ms <= 0 || ticks < 0) continue
+            // USER_HZ is 100 on Android: ticks/100 seconds of CPU per ms/1000 of wall clock.
+            peak = maxOf(peak, ((ticks * 1000.0) / (ms * 1.0)).toInt())
+        }
+        return peak.takeIf { it > 0 }
+    }
+
     /** The last few readings, newest last, ready to show. */
     fun memoryTrace(samples: Int = 6): List<String> =
-        memorySamples().takeLast(samples).map { (bytes, _, low) ->
+        memorySamples().takeLast(samples).map { sample ->
             appContext.getString(
                 R.string.mem_sample,
-                formatBytes(bytes),
-                if (low) appContext.getString(R.string.mem_low) else "",
+                formatBytes(sample.freeBytes),
+                if (sample.low) appContext.getString(R.string.mem_low) else "",
             )
         }
 
@@ -226,7 +291,7 @@ class LinuxEnvironment(context: Context) {
      * the floor is high, the session was not killed for memory, and three
      * sessions' worth of that assumption were wrong.
      */
-    fun memoryFloor(): Long? = memorySamples().minOfOrNull { it.first }
+    fun memoryFloor(): Long? = memorySamples().minOfOrNull { it.freeBytes }
 
     /**
      * How many processes the container was running, at its peak and at the
@@ -237,12 +302,12 @@ class LinuxEnvironment(context: Context) {
      * SIGKILL that memory cannot explain. The number settles it either way, and
      * after being wrong three times about this, the number is the point.
      */
-    fun guestProcessPeak(): Int = memorySamples().maxOfOrNull { it.second } ?: 0
+    fun guestProcessPeak(): Int = memorySamples().maxOfOrNull { it.processes } ?: 0
 
-    fun guestProcessLast(): Int = memorySamples().lastOrNull { it.second > 0 }?.second ?: 0
+    fun guestProcessLast(): Int = memorySamples().lastOrNull { it.processes > 0 }?.processes ?: 0
 
     /** Did Android ever flag the device as low on memory during the session? */
-    fun memoryEverLow(): Boolean = memorySamples().any { it.third }
+    fun memoryEverLow(): Boolean = memorySamples().any { it.low }
 
     /**
      * How the container's own process ended, as the kernel reported it to us.

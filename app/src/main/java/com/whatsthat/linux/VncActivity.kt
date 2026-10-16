@@ -235,7 +235,22 @@ class VncActivity : AppCompatActivity() {
                     if (peak > 0) {
                         evidence += "\n\n" + getString(R.string.vnc_gone_processes, last, peak)
                     }
+                    // Android 12 brought in two rules for an app's unmanaged
+                    // processes, not one: a cap on how many, and a limit on how
+                    // much processor they use. The count came back under the
+                    // cap, so this is the other half of the same switch.
+                    runCatching { env.guestCpuPeakPercent() }.getOrNull()?.let { cpu ->
+                        evidence += "\n\n" + getString(R.string.vnc_gone_cpu, cpu)
+                    }
                 }
+                // Which phone this is, because manufacturers differ in what
+                // they kill and this has never once been written down.
+                evidence += "\n\n" + getString(
+                    R.string.vnc_gone_device,
+                    "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}",
+                    android.os.Build.VERSION.RELEASE,
+                    android.os.Build.VERSION.SDK_INT,
+                )
             }
             // One signature in the log is decisive, and it is not "proot is
             // gone" — proot exits whenever the session ends, so finding it gone

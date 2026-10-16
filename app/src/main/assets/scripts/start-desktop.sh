@@ -191,6 +191,44 @@ XFWM
     echo "[desktop] compositing turned off — there is no GPU behind a VNC server, so it was costing the processor for shadows."
 }
 
+# Keep the container open for as long as the session lives.
+#
+# This script used to print VNC_READY and exit 0 immediately. That left proot —
+# the process the app holds, and the one Android sees as this app's child —
+# running with its main command finished, holding a set of tracees whose own
+# parents had exited and been reparented to init. A container whose lifetime is
+# "until the launcher script finishes" is not the same thing as a container
+# whose lifetime is the session, and everything downstream was reading the
+# wrong one: the exit status the app records, when the session is considered
+# over, and what the app's handle refers to at all.
+#
+# So the launcher becomes the session's own process and waits for the X server.
+# When the server goes, this returns, proot unwinds, and the status the app
+# records is the status of the thing that actually ended.
+hold_session() {
+    local pid="" f
+    for f in /root/.vnc/*":$DISPLAY_NUM.pid"; do
+        [ -r "$f" ] || continue
+        read -r pid < "$f" 2>/dev/null || pid=""
+        break
+    done
+    case "${pid:-}" in ''|*[!0-9]*) pid="" ;; esac
+    if [ -n "$pid" ]; then
+        echo "[desktop] holding the container open for the X server (pid $pid)."
+    else
+        echo "[desktop] holding the container open (no pid file; watching the display lock)."
+    fi
+    while :; do
+        if [ -n "$pid" ]; then
+            [ -e "/proc/$pid" ] || break
+        else
+            [ -e "/tmp/.X${DISPLAY_NUM}-lock" ] || break
+        fi
+        sleep 5 || break
+    done
+    echo "[desktop] the session has ended; releasing the container."
+}
+
 # How many processes this container is running, by the same criterion the
 # sweeps use. Printed after a launch because it is the number that decides
 # whether Android will let the session live.
@@ -1010,7 +1048,7 @@ fi
 # file actually defines — because an edit once removed four of these at once,
 # the file still parsed, CI stayed green, and the phone said
 # "wait_for_session: command not found" halfway through a launch.
-WT_REQUIRED_FUNCTIONS="read_field read_starttime load_spare_tracer trim_autostart tune_xfce count_guest_processes ensure_apt_lists ensure_packages ensure_firefox tune_firefox sweep_orphans sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus system_bus_answers wait_for_socket attempt start_audio"
+WT_REQUIRED_FUNCTIONS="read_field read_starttime load_spare_tracer trim_autostart tune_xfce hold_session count_guest_processes ensure_apt_lists ensure_packages ensure_firefox tune_firefox sweep_orphans sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus system_bus_answers wait_for_socket attempt start_audio"
 for _f in $WT_REQUIRED_FUNCTIONS; do
     if ! declare -F "$_f" >/dev/null; then
         echo "[desktop] INTERNAL ERROR: this script is missing $_f. Not launching."
@@ -1032,6 +1070,7 @@ for stype in $CANDIDATES; do
         # pays for the discovery once.
         echo "WT_SESSION_USED $stype"
         echo "VNC_READY 127.0.0.1:$PORT"
+        hold_session
         exit 0
     fi
     echo "[desktop] cleaning up before the next attempt..."

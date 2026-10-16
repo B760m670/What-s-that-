@@ -170,8 +170,9 @@ class LinuxEnvironment(context: Context) {
             // Free bytes, how many processes the container is running, and
             // whether Android called the device low — the three numbers that
             // between them name every way a session has died so far.
-            val (procs, ticks) = guestStats()
-            val line = "${info.availMem},$procs,$ticks,${System.currentTimeMillis()}" +
+            val st = guestStats()
+            val line = "${info.availMem},${st.processes},${st.guestTicks}," +
+                "${System.currentTimeMillis()},${st.prootTicks}" +
                 if (info.lowMemory) "|low" else ""
             memoryLog.parentFile?.mkdirs()
             // Rewritten rather than appended: it is a ring of a few dozen
@@ -190,7 +191,7 @@ class LinuxEnvironment(context: Context) {
      * matters because Android caps how many unmanaged child processes an app
      * may have, and kills them when it is exceeded.
      */
-    fun guestProcessCount(): Int = guestStats().first
+    fun guestProcessCount(): Int = guestStats().processes
 
     /**
      * The container, counted and timed in one pass: how many processes it is
@@ -207,9 +208,12 @@ class LinuxEnvironment(context: Context) {
      * across every tracee. A rate only means something between two samples, so
      * this records the total and the arithmetic happens later.
      */
-    private fun guestStats(): Pair<Int, Long> = runCatching {
+    private data class Stats(val processes: Int, val guestTicks: Long, val prootTicks: Long)
+
+    private fun guestStats(): Stats = runCatching {
         var count = 0
-        var ticks = 0L
+        var guest = 0L
+        var proot = 0L
         for (d in File("/proc").listFiles() ?: emptyArray()) {
             if (!d.isDirectory || !d.name.all(Char::isDigit)) continue
             val traced = runCatching {
@@ -218,17 +222,24 @@ class LinuxEnvironment(context: Context) {
                         ?.substringAfter(':')?.trim()?.toIntOrNull()?.let { it != 0 } ?: false
                 }
             }.getOrDefault(false)
-            if (!traced) continue
-            count++
             // Fields 14 and 15 of /proc/<pid>/stat, counting from the state at
             // field 3 — so positions 12 and 13 of what follows the comm.
-            runCatching {
-                val f = File(d, "stat").readText().substringAfter(") ").trim().split(" ")
-                ticks += (f.getOrNull(11)?.toLongOrNull() ?: 0L) + (f.getOrNull(12)?.toLongOrNull() ?: 0L)
+            val stat = runCatching { File(d, "stat").readText() }.getOrNull() ?: continue
+            val f = stat.substringAfter(") ").trim().split(" ")
+            val t = (f.getOrNull(11)?.toLongOrNull() ?: 0L) + (f.getOrNull(12)?.toLongOrNull() ?: 0L)
+            when {
+                traced -> { count++; guest += t }
+                // proot is NOT a tracee — it is the tracer — so every reading
+                // so far has left it out. It is also the process Android kills:
+                // the app's own child, the one the exit status belongs to. And
+                // its processor use rises with the guest's, because every
+                // intercepted system call is a context switch into it. Leaving
+                // it out of a measurement about processor use was a hole.
+                stat.substringAfter('(').substringBefore(')') == "proot" -> proot += t
             }
         }
-        count to ticks
-    }.getOrDefault(0 to 0L)
+        Stats(count, guest, proot)
+    }.getOrDefault(Stats(0, 0L, 0L))
 
     /** One recorded reading. */
     private data class Sample(
@@ -236,6 +247,7 @@ class LinuxEnvironment(context: Context) {
         val processes: Int,
         val cpuTicks: Long,
         val atMs: Long,
+        val prootTicks: Long,
         val low: Boolean,
     )
 
@@ -250,6 +262,7 @@ class LinuxEnvironment(context: Context) {
                     p.getOrNull(1)?.toIntOrNull() ?: 0,
                     p.getOrNull(2)?.toLongOrNull() ?: 0L,
                     p.getOrNull(3)?.toLongOrNull() ?: 0L,
+                    p.getOrNull(4)?.toLongOrNull() ?: 0L,
                     low,
                 )
             }
@@ -261,13 +274,18 @@ class LinuxEnvironment(context: Context) {
      * Computed between consecutive samples, because a total tells nothing on
      * its own. Returns null when there is not enough to compare.
      */
-    fun guestCpuPeakPercent(): Int? {
+    fun guestCpuPeakPercent(): Int? = cpuPeak { it.cpuTicks }
+
+    /** The same for proot itself — the process that is actually being killed. */
+    fun prootCpuPeakPercent(): Int? = cpuPeak { it.prootTicks }
+
+    private fun cpuPeak(ticksOf: (Sample) -> Long): Int? {
         val s = memorySamples().filter { it.atMs > 0 }
         if (s.size < 2) return null
         var peak = 0
         for (i in 1 until s.size) {
             val ms = s[i].atMs - s[i - 1].atMs
-            val ticks = s[i].cpuTicks - s[i - 1].cpuTicks
+            val ticks = ticksOf(s[i]) - ticksOf(s[i - 1])
             if (ms <= 0 || ticks < 0) continue
             // USER_HZ is 100 on Android: ticks/100 seconds of CPU per ms/1000 of wall clock.
             peak = maxOf(peak, ((ticks * 1000.0) / (ms * 1.0)).toInt())

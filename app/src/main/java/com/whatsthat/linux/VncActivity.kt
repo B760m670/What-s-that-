@@ -239,8 +239,12 @@ class VncActivity : AppCompatActivity() {
                     // processes, not one: a cap on how many, and a limit on how
                     // much processor they use. The count came back under the
                     // cap, so this is the other half of the same switch.
-                    runCatching { env.guestCpuPeakPercent() }.getOrNull()?.let { cpu ->
-                        evidence += "\n\n" + getString(R.string.vnc_gone_cpu, cpu)
+                    val guestCpu = runCatching { env.guestCpuPeakPercent() }.getOrNull()
+                    val prootCpu = runCatching { env.prootCpuPeakPercent() }.getOrNull()
+                    if (guestCpu != null || prootCpu != null) {
+                        evidence += "\n\n" + getString(
+                            R.string.vnc_gone_cpu, guestCpu ?: 0, prootCpu ?: 0
+                        )
                     }
                 }
                 // Which phone this is, because manufacturers differ in what

@@ -158,6 +158,39 @@ trim_autostart() {
     done
 }
 
+# Turn off XFCE's compositing, once.
+#
+# Compositing means every window is drawn into an offscreen buffer and then
+# composed into the screen — a second full pass over every pixel. On a GPU that
+# is free. Here there is no GPU: llvmpipe does it on the CPU, xfwm4 says so
+# itself in the log ("Unsupported GL renderer (llvmpipe)"), and then the result
+# is handed to a VNC encoder that reads every changed pixel again.
+#
+# What it buys on a phone screen over a remote framebuffer is shadows and fade
+# animations. What it costs is the processor, continuously, for as long as
+# anything on screen moves — and Android's limit on unmanaged processes covers
+# processor use as well as their number.
+#
+# Written once and marked, so that a user who turns it back on keeps it on.
+tune_xfce() {
+    local dir=/root/.config/xfce4/xfconf/xfce-perchannel-xml
+    local stamp=/root/.wt-xfwm-tuned
+    [ -e "$stamp" ] && return 0
+    mkdir -p "$dir" 2>/dev/null || return 0
+    cat > "$dir/xfwm4.xml" <<'XFWM'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfwm4" version="1.0">
+  <property name="general" type="empty">
+    <property name="use_compositing" type="bool" value="false"/>
+    <property name="box_move" type="bool" value="true"/>
+    <property name="box_resize" type="bool" value="true"/>
+  </property>
+</channel>
+XFWM
+    : > "$stamp" 2>/dev/null || true
+    echo "[desktop] compositing turned off — there is no GPU behind a VNC server, so it was costing the processor for shadows."
+}
+
 # How many processes this container is running, by the same criterion the
 # sweeps use. Printed after a launch because it is the number that decides
 # whether Android will let the session live.
@@ -212,6 +245,7 @@ sweep() {   # $1 = signal
 
 load_spare_tracer
 trim_autostart
+tune_xfce
 vncserver -kill ":$DISPLAY_NUM" >/dev/null 2>&1 || true
 sweep TERM
 sleep 2 || true
@@ -976,7 +1010,7 @@ fi
 # file actually defines — because an edit once removed four of these at once,
 # the file still parsed, CI stayed green, and the phone said
 # "wait_for_session: command not found" halfway through a launch.
-WT_REQUIRED_FUNCTIONS="read_field read_starttime load_spare_tracer trim_autostart count_guest_processes ensure_apt_lists ensure_packages ensure_firefox tune_firefox sweep_orphans sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus system_bus_answers wait_for_socket attempt start_audio"
+WT_REQUIRED_FUNCTIONS="read_field read_starttime load_spare_tracer trim_autostart tune_xfce count_guest_processes ensure_apt_lists ensure_packages ensure_firefox tune_firefox sweep_orphans sweep have setup_gnome mapped_windows session_alive wait_for_session teardown report_session start_system_bus system_bus_answers wait_for_socket attempt start_audio"
 for _f in $WT_REQUIRED_FUNCTIONS; do
     if ! declare -F "$_f" >/dev/null; then
         echo "[desktop] INTERNAL ERROR: this script is missing $_f. Not launching."
